@@ -3479,6 +3479,449 @@ R2
 </tbody>
 </table>
 </div>
+<div id="exploratory-what-if-we-use-phq-2-sum-score-as-our-theta" class="section level3">
+<h3>Exploratory: What if we use PHQ-2 sum score as our “theta”?</h3>
+<pre class="r"><code>df$core_symptom_sum &lt;- df$phq_1 + df$phq_2
+
+# Correlations between sum scores and thetas
+df %&gt;%
+  select(core_symptom_sum, phq_sum, starts_with(&quot;theta&quot;)) %&gt;%
+  cor() %&gt;%
+  kable() %&gt;%
+  kable_styling()</code></pre>
+<table class="table" style="margin-left: auto; margin-right: auto;">
+<thead>
+<tr>
+<th style="text-align:left;">
+</th>
+<th style="text-align:right;">
+core_symptom_sum
+</th>
+<th style="text-align:right;">
+phq_sum
+</th>
+<th style="text-align:right;">
+theta_lordif
+</th>
+<th style="text-align:right;">
+theta_fcm
+</th>
+<th style="text-align:right;">
+theta_csm
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+core_symptom_sum
+</td>
+<td style="text-align:right;">
+1.0000000
+</td>
+<td style="text-align:right;">
+0.8746045
+</td>
+<td style="text-align:right;">
+0.8755772
+</td>
+<td style="text-align:right;">
+0.8755475
+</td>
+<td style="text-align:right;">
+0.8845310
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+phq_sum
+</td>
+<td style="text-align:right;">
+0.8746045
+</td>
+<td style="text-align:right;">
+1.0000000
+</td>
+<td style="text-align:right;">
+0.9658911
+</td>
+<td style="text-align:right;">
+0.9658760
+</td>
+<td style="text-align:right;">
+0.9678790
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+theta_lordif
+</td>
+<td style="text-align:right;">
+0.8755772
+</td>
+<td style="text-align:right;">
+0.9658911
+</td>
+<td style="text-align:right;">
+1.0000000
+</td>
+<td style="text-align:right;">
+0.9999996
+</td>
+<td style="text-align:right;">
+0.9941849
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+theta_fcm
+</td>
+<td style="text-align:right;">
+0.8755475
+</td>
+<td style="text-align:right;">
+0.9658760
+</td>
+<td style="text-align:right;">
+0.9999996
+</td>
+<td style="text-align:right;">
+1.0000000
+</td>
+<td style="text-align:right;">
+0.9941864
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+theta_csm
+</td>
+<td style="text-align:right;">
+0.8845310
+</td>
+<td style="text-align:right;">
+0.9678790
+</td>
+<td style="text-align:right;">
+0.9941849
+</td>
+<td style="text-align:right;">
+0.9941864
+</td>
+<td style="text-align:right;">
+1.0000000
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code># Logistic models
+&quot;phq_&quot; %+% 1:9 %&gt;%
+  map(.,
+      ~ lrm(
+        data = df,
+        formula = as.formula(. %+% &quot; ~ core_symptom_sum + sample_hms&quot;)
+      )) %&gt;%
+  tidy_lrm_list(theta = &quot;core_symptom_sum&quot;) %&gt;%
+  drop_na() %&gt;%
+  kable() %&gt;%
+  kable_styling()</code></pre>
+<pre><code>## Warning in lrm(data = df, formula = as.formula(. %+% &quot; ~ core_symptom_sum +
+## sample_hms&quot;)): Unable to fit model using &quot;lrm.fit&quot;</code></pre>
+<pre><code>## Warning in sqrt(.): NaNs produced</code></pre>
+<table class="table" style="margin-left: auto; margin-right: auto;">
+<thead>
+<tr>
+<th style="text-align:left;">
+var
+</th>
+<th style="text-align:left;">
+or_1
+</th>
+<th style="text-align:left;">
+or_2
+</th>
+<th style="text-align:left;">
+or_3
+</th>
+<th style="text-align:left;">
+or_4
+</th>
+<th style="text-align:left;">
+or_5
+</th>
+<th style="text-align:left;">
+or_6
+</th>
+<th style="text-align:left;">
+or_7
+</th>
+<th style="text-align:left;">
+or_8
+</th>
+<th style="text-align:left;">
+or_9
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+y&gt;=1
+</td>
+<td style="text-align:left;">
+0.04 (0.04, 0.04)
+</td>
+<td style="text-align:left;">
+0.03 (0.02, 0.03)
+</td>
+<td style="text-align:left;">
+0.4 (0.39, 0.41)
+</td>
+<td style="text-align:left;">
+0.66 (0.65, 0.68)
+</td>
+<td style="text-align:left;">
+0.19 (0.18, 0.19)
+</td>
+<td style="text-align:left;">
+0.07 (0.07, 0.08)
+</td>
+<td style="text-align:left;">
+0.09 (NaN, NaN)
+</td>
+<td style="text-align:left;">
+0.06 (0.06, 0.06)
+</td>
+<td style="text-align:left;">
+0.01 (0.01, 0.01)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+y&gt;=2
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+<td style="text-align:left;">
+0.07 (0.06, 0.07)
+</td>
+<td style="text-align:left;">
+0.06 (0.05, 0.06)
+</td>
+<td style="text-align:left;">
+0.04 (0.03, 0.04)
+</td>
+<td style="text-align:left;">
+0.01 (0.01, 0.01)
+</td>
+<td style="text-align:left;">
+0.02 (NaN, NaN)
+</td>
+<td style="text-align:left;">
+0.01 (0.01, 0.01)
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+y&gt;=3
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+<td style="text-align:left;">
+0.02 (0.02, 0.02)
+</td>
+<td style="text-align:left;">
+0.01 (0.01, 0.01)
+</td>
+<td style="text-align:left;">
+0.01 (0.01, 0.01)
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+<td style="text-align:left;">
+0 (NaN, NaN)
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+<td style="text-align:left;">
+0 (0, 0)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+core_symptom_sum
+</td>
+<td style="text-align:left;">
+20.83 (20.21, 21.47)
+</td>
+<td style="text-align:left;">
+20.54 (19.94, 21.16)
+</td>
+<td style="text-align:left;">
+2.09 (2.08, 2.11)
+</td>
+<td style="text-align:left;">
+2.45 (2.43, 2.48)
+</td>
+<td style="text-align:left;">
+2.09 (2.07, 2.11)
+</td>
+<td style="text-align:left;">
+2.68 (2.65, 2.7)
+</td>
+<td style="text-align:left;">
+2.21 (NaN, NaN)
+</td>
+<td style="text-align:left;">
+1.9 (1.88, 1.92)
+</td>
+<td style="text-align:left;">
+2.2 (2.17, 2.22)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+sample_hms
+</td>
+<td style="text-align:left;">
+1.17 (1.11, 1.23)
+</td>
+<td style="text-align:left;">
+1.47 (1.39, 1.55)
+</td>
+<td style="text-align:left;">
+2.01 (1.94, 2.07)
+</td>
+<td style="text-align:left;">
+2.47 (2.39, 2.55)
+</td>
+<td style="text-align:left;">
+2.9 (2.8, 3.01)
+</td>
+<td style="text-align:left;">
+4 (3.84, 4.17)
+</td>
+<td style="text-align:left;">
+4.81 (4.55, 5.07)
+</td>
+<td style="text-align:left;">
+2.11 (2.02, 2.22)
+</td>
+<td style="text-align:left;">
+3.52 (3.26, 3.8)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+R2
+</td>
+<td style="text-align:left;">
+0.878
+</td>
+<td style="text-align:left;">
+0.878
+</td>
+<td style="text-align:left;">
+0.366
+</td>
+<td style="text-align:left;">
+0.455
+</td>
+<td style="text-align:left;">
+0.387
+</td>
+<td style="text-align:left;">
+0.515
+</td>
+<td style="text-align:left;">
+0.444
+</td>
+<td style="text-align:left;">
+0.277
+</td>
+<td style="text-align:left;">
+0.335
+</td>
+</tr>
+</tbody>
+</table>
+<p>Do we get different estimates of depression using PHQ-9 and PHQ-2
+cutoffs?</p>
+<pre class="r"><code>library(survey)</code></pre>
+<pre><code>## Loading required package: grid</code></pre>
+<pre><code>## Loading required package: Matrix</code></pre>
+<pre><code>## 
+## Attaching package: &#39;Matrix&#39;</code></pre>
+<pre><code>## The following objects are masked from &#39;package:tidyr&#39;:
+## 
+##     expand, pack, unpack</code></pre>
+<pre><code>## Loading required package: survival</code></pre>
+<pre><code>## 
+## Attaching package: &#39;survey&#39;</code></pre>
+<pre><code>## The following object is masked from &#39;package:rms&#39;:
+## 
+##     calibrate</code></pre>
+<pre><code>## The following object is masked from &#39;package:Hmisc&#39;:
+## 
+##     deff</code></pre>
+<pre><code>## The following object is masked from &#39;package:graphics&#39;:
+## 
+##     dotchart</code></pre>
+<pre class="r"><code>df &lt;- df %&gt;%
+  mutate(
+    across(
+      all_of(&quot;phq_&quot; %+% 1:9),
+      ~ . &gt;= 2,
+      .names = &quot;{.col}_bin&quot;
+    ),
+    elevated_symptoms_total = phq_1_bin + phq_2_bin + phq_3_bin + phq_4_bin + phq_5_bin + phq_6_bin + phq_7_bin + phq_8_bin + phq_9_bin,
+    elevated_core_symptoms = phq_1_bin + phq_2_bin,
+    diagnostic_algorithm = elevated_symptoms_total &gt;= 5 &amp; elevated_core_symptoms &gt;= 1
+  )
+
+df_weights &lt;- df %&gt;%
+  drop_na(weight)
+
+design &lt;- svydesign(
+  data = df_weights,
+  ids = ~ 0,
+  strata = ~ sample_char,
+  weights = ~ weight
+)
+
+svyby(~ phq_sum &gt;= 10, ~ sample_char, design, svyciprop, vartype = &quot;ci&quot;) # Good properties vs diagnostic interviews (1)</code></pre>
+<pre><code>##        sample_char phq_sum &gt;= 10       ci_l       ci_u
+## HMS            HMS    0.40791965 0.40051467 0.41536668
+## NHANES      NHANES    0.08588905 0.07746009 0.09514063</code></pre>
+<pre class="r"><code>svyby(~ core_symptom_sum &gt;= 3, ~ sample_char, design, svyciprop, vartype = &quot;ci&quot;) # Good properties (2)</code></pre>
+<pre><code>##        sample_char core_symptom_sum &gt;= 3      ci_l       ci_u
+## HMS            HMS            0.30078023 0.2939112 0.30773987
+## NHANES      NHANES            0.08466127 0.0762954 0.09385127</code></pre>
+<pre class="r"><code>svyby(~ core_symptom_sum &gt;= 3 &amp; phq_sum &gt;= 10, ~ sample_char, design, svyciprop, vartype = &quot;ci&quot;) # Even better properties (2) </code></pre>
+<pre><code>##        sample_char core_symptom_sum &gt;= 3 &amp; phq_sum &gt;= 10       ci_l       ci_u
+## HMS            HMS                            0.26820685 0.26153544 0.27498507
+## NHANES      NHANES                            0.05323876 0.04696951 0.06029185</code></pre>
+<pre class="r"><code>svyby(~ diagnostic_algorithm, ~ sample_char, design, svyciprop, vartype = &quot;ci&quot;) # Not recommended (1) (3)</code></pre>
+<pre><code>##        sample_char diagnostic_algorithm       ci_l       ci_u
+## HMS            HMS           0.20878432 0.20328095 0.21439660
+## NHANES      NHANES           0.03248707 0.02778184 0.03795808</code></pre>
+<pre class="r"><code># (1) https://karger.com/pps/article/89/1/25/289799/The-Accuracy-of-the-Patient-Health-Questionnaire-9
+# (2) https://jamanetwork.com/journals/jama/article-abstract/2766865
+# (3) https://www.sciencedirect.com/science/article/abs/pii/S0163834314002540?via%3Dihub</code></pre>
+</div>
 </div>
 
 

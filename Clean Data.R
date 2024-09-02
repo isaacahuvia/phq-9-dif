@@ -57,7 +57,8 @@ nhanes_demo_data <- nhanes_demo_files %>%
     age = RIDAGEYR,
     income = INDFMPIR,
     weight = WTINTPRP
-  )
+  ) %>%
+  filter(age >= 18)
 
 # Load and bind PHQ-9 files
 nhanes_phq_files <- list.files(here("Data", "NHANES", "PHQ"), full.names = T)
