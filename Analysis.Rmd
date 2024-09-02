@@ -26,6 +26,16 @@ df <- readRDS(here("Data", "Clean Data.rds"))
 
 
 ## Custom functions
+pull_scaled_theta <- function(model) {
+  
+  model %>%
+    fscores() %>%
+    scale() %>%
+    as.numeric() %>%
+    return()
+  
+}
+
 plot_mean_response <- function(model, theta = "theta_fcm") {
   
   class <- class(model)
@@ -233,7 +243,7 @@ release_and_test <- function(item, theta = "theta_fcm") {
     verbose = F
   )
   
-  theta_released <- fscores(released_model)
+  theta_released <- pull_scaled_theta(released_model)
   
   print("Correlation between released theta and original theta: " %+% round(cor(df[[theta]], theta_released), 2))
   print("Proportion of participants whose theta changes more than .3 units: " %+% percent(mean((df[[theta]] - theta_released) > .3), .1))
@@ -250,17 +260,24 @@ dif <- lordif(
   group = df$sample_hms,
   selection = 1:9,
   criterion = "R2",
-  pseudo.R2 = "McFadden",
+  pseudo.R2 = "Nagelkerke",
   R2.change = .02
   # weights = df$scaled_weight
 )
 ```
 
 ```{r}
+# Table 1
 dif %>%
   summary() %>%
   pluck("stats") %>%
-  kable(digits = 3) %>%
+  select(item, chi12, chi23, beta12, pseudo12.Nagelkerke, pseudo23.Nagelkerke) %>%
+  mutate(
+    across(c(chi12, chi23), ~ round(., 3)),
+    beta12 = percent(beta12, .1),
+    across(c(pseudo12.Nagelkerke, pseudo23.Nagelkerke), ~ round(., 3))
+  ) %>%
+  kable() %>%
   kable_styling()
 
 # Pull theta
@@ -272,13 +289,14 @@ fully_constrained_model <- multipleGroup(
   model = 1,
   group = df$sample_char,
   invariance = "phq_" %+% 1:9,
+  method = "EM", # "Standard EM algorithm with fixed quadrature"
   verbose = F
 )
 
 # coef(fully_constrained_model)
 
 # Pull theta
-df$theta_fcm <- as.numeric(fscores(fully_constrained_model))
+df$theta_fcm <- pull_scaled_theta(fully_constrained_model)
 
 # Correlations between thetas, phq_sum
 df %>%
@@ -717,7 +735,7 @@ core_symptom_model <- multipleGroup(
 
 # coef(core_symptom_model)
 
-df$theta_csm <- as.numeric(fscores(core_symptom_model))
+df$theta_csm <- pull_scaled_theta(core_symptom_model)
 
 # Correlations between thetas across models
 df %>%
