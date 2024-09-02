@@ -1,0 +1,751 @@
+---
+title: "PHQ-9 DIF Analysis"
+output: html_document
+date: "2024-09-01"
+---
+
+```{r, include = F}
+## Set seed
+set.seed(57135)
+
+
+## Load packages
+library(here)
+library(lordif)
+library(ltm)
+library(mirt)
+library(kableExtra)
+library(broom)
+library(scales)
+library(tidyverse)
+`%+%` <- paste0
+
+
+## Load data
+df <- readRDS(here("Data", "Clean Data.rds"))
+
+
+## Custom functions
+plot_mean_response <- function(model, theta = "theta_fcm") {
+  
+  class <- class(model)
+  
+  min_theta <- min(df[[theta]])
+  max_theta <- max(df[[theta]])
+  
+  out <- expand_grid(
+    theta_temp = seq(min_theta, max_theta, .01),
+    sample_hms = c(0, 1)
+  )
+  
+  names(out)[names(out) == "theta_temp"] <- theta
+  
+  predictions <- predict(
+    object = model,
+    newdata = out,
+    type = if_else(
+      "lm" %in% class,
+      "response",
+      "mean"
+    )
+  )
+  
+  out$pred <- predictions
+  
+  plot <- out %>%
+    mutate(
+      sample_hms = case_match(
+        sample_hms, 
+        0 ~ "NHANES", 
+        1 ~ "HMS" 
+      )
+    ) %>%
+    ggplot() +
+    geom_line(
+      aes(.data[[theta]], pred, group = sample_hms, color = sample_hms),
+      linewidth = 1
+    ) +
+    scale_x_continuous(
+      name = expression(paste("Estimated Depression (", theta, ")"))
+    ) +
+    scale_color_discrete(
+      name = "Sample"
+    ) +
+    theme_classic()
+  
+  if(any("lrm" %in% class)) {
+    
+    plot <- plot + 
+        scale_y_continuous(
+        name = "Predicted Response",
+        limits = c(0, 3),
+        breaks = 0:3,
+        labels = c("Not at all", "Several days", "More than half the days", "Nearly every day")
+      )
+    
+  }
+  
+  return(plot)
+  
+}
+
+plot_response_curves <- function(model, theta = "theta_fcm") {
+  
+  min_theta <- min(df[[theta]])
+  max_theta <- max(df[[theta]])
+  
+  out <- expand_grid(
+    theta_temp = seq(min_theta, max_theta, .01),
+    sample_hms = c(0, 1)
+  )
+  
+  names(out)[names(out) == "theta_temp"] <- theta
+  
+  predictions <- predict(
+    object = model,
+    newdata = out,
+    type = "fitted.ind"
+  )
+  
+  out$pred_0 <- as.numeric(predictions[, 1])
+  out$pred_1 <- as.numeric(predictions[, 2])
+  out$pred_2 <- as.numeric(predictions[, 3])
+  out$pred_3 <- as.numeric(predictions[, 4])
+  
+  plot <- out %>%
+    mutate(
+      sample_hms = case_match(
+        sample_hms, 
+        0 ~ "NHANES", 
+        1 ~ "HMS" 
+      )
+    ) %>%
+    pivot_longer(
+      cols = c("pred_0", "pred_1", "pred_2", "pred_3"),
+      names_to = "response_level",
+      values_to = "prob"
+    ) %>%
+    ggplot() +
+    geom_line(
+      aes(.data[[theta]], prob, group = response_level, color = response_level),
+      linewidth = 1
+    ) +
+    scale_x_continuous(
+      name = expression(paste("Estimated Depression (", theta, ")"))
+    ) +
+    scale_y_continuous(
+      name = "Probability"
+    ) +
+    scale_color_discrete(
+      name = "Response Level",
+      labels = c("Not at all", "Several days", "More than half the days", "Nearly every day")
+    ) +
+    facet_wrap(~ sample_hms, ncol = 1) +
+    theme_classic()
+  
+  return(plot)
+  
+}
+
+or_lrm <- function(model) {
+  
+  coef <- model$coefficients
+  
+  se <- model$var %>%
+    diag() %>%
+    sqrt()
+  
+  out <- tibble(
+    var = names(coef),
+    or = exp(coef),
+    high = exp(coef + (se * qnorm(.975))),
+    low = exp(coef + (se * qnorm(.025)))
+  )
+  
+  return(out)
+  
+}
+
+tidy_lrm <- function(model) {
+  
+  r2 <- tibble(
+    var = "R2",
+    or = model$stats[["R2"]] %>%
+      round(3) %>%
+      as.character()
+  )
+  
+  model %>%
+    or_lrm() %>%
+    mutate(
+      or = paste0(
+        round(or, 2),
+        " (",
+        round(low, 2),
+        ", ",
+        round(high, 2),
+        ")"
+      )
+    ) %>%
+    select(var, or) %>%
+    bind_rows(r2) %>%
+    return()
+  
+}
+
+tidy_lrm_list <- function(model_list, theta = "theta_fcm") {
+  
+  out <- tibble(
+    var = c("y>=1", "y>=2", "y>=3", theta, "sample_hms", theta %+% " * sample_hms", "R2")
+  )
+  
+  tidy_output_1 <- tidy_lrm(
+    model_list[[1]]
+  )
+  
+  names(tidy_output_1)[names(tidy_output_1) == "or"] <- "or_1"
+    
+  out <- left_join(out, tidy_output_1, by = "var")
+  
+  for(i in 2:length(model_list)) {
+    
+    tidy_output_i <- tidy_lrm(
+      model_list[[i]]
+    )
+    
+    names(tidy_output_i)[names(tidy_output_i) == "or"] <- "or_" %+% i
+    
+    out <- left_join(out, tidy_output_i, by = "var")
+    
+  }
+  
+  return(out)
+  
+}
+
+release_and_test <- function(item, theta = "theta_fcm") {
+  
+  released_model <- multipleGroup(
+    data = df[, 1:9],
+    model = 1,
+    group = df$sample_char,
+    invariance = setdiff("phq_" %+% 1:9, item),
+    verbose = F
+  )
+  
+  theta_released <- fscores(released_model)
+  
+  print("Correlation between released theta and original theta: " %+% round(cor(df[[theta]], theta_released), 2))
+  print("Proportion of participants whose theta changes more than .3 units: " %+% percent(mean((df[[theta]] - theta_released) > .3), .1))
+  
+}
+```
+
+## Global DIF Test
+
+```{r, include = F}
+# Calculate DIF via lordif
+dif <- lordif(
+  resp.data = data.frame(df),
+  group = df$sample_hms,
+  selection = 1:9,
+  criterion = "R2",
+  pseudo.R2 = "McFadden",
+  R2.change = .02
+  # weights = df$scaled_weight
+)
+```
+
+```{r}
+dif %>%
+  summary() %>%
+  pluck("stats") %>%
+  kable(digits = 3) %>%
+  kable_styling()
+
+# Pull theta
+df$theta_lordif <- as.numeric(dif$calib$theta)
+
+# In the absence of DIF, calculate fully constrained IRT model; thetas should match
+fully_constrained_model <- multipleGroup(
+  data = df[, 1:9],
+  model = 1,
+  group = df$sample_char,
+  invariance = "phq_" %+% 1:9,
+  verbose = F
+)
+
+# coef(fully_constrained_model)
+
+# Pull theta
+df$theta_fcm <- as.numeric(fscores(fully_constrained_model))
+
+# Correlations between thetas, phq_sum
+df %>%
+  select(phq_sum, theta_lordif, theta_fcm) %>%
+  cor() %>%
+  kable() %>%
+  kable_styling()
+```
+
+### Item 1: Anhedonia
+
+```{r}
+# Calculate models
+phq_1_model_1 <- lrm(data = df, formula = phq_1 ~ theta_fcm)
+phq_1_model_2 <- lrm(data = df, formula = phq_1 ~ theta_fcm + sample_hms)
+phq_1_model_3 <- lrm(data = df, formula = phq_1 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_1_model_1, phq_1_model_2, phq_1_model_3), "theta_fcm") %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_1_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 1: Anhedonia"
+  )
+
+plot_response_curves(phq_1_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 1: Anhedonia"
+  )
+
+# Measure change in theta in constrained model
+release_and_test("phq_1")
+```
+
+### Item 2: Depressed Mood
+
+```{r}
+# Calculate models
+phq_2_model_1 <- lrm(data = df, formula = phq_2 ~ theta_fcm)
+phq_2_model_2 <- lrm(data = df, formula = phq_2 ~ theta_fcm + sample_hms)
+phq_2_model_3 <- lrm(data = df, formula = phq_2 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_2_model_1, phq_2_model_2, phq_2_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_2_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 2: Depressed Mood"
+  )
+
+plot_response_curves(phq_2_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 2: Depressed Mood"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_2")
+```
+
+### Item 3: Trouble Sleeping
+
+```{r}
+# Calculate models
+phq_3_model_1 <- lrm(data = df, formula = phq_3 ~ theta_fcm)
+phq_3_model_2 <- lrm(data = df, formula = phq_3 ~ theta_fcm + sample_hms)
+phq_3_model_3 <- lrm(data = df, formula = phq_3 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_3_model_1, phq_3_model_2, phq_3_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_3_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 3: Trouble Sleeping"
+  )
+
+plot_response_curves(phq_3_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 3: Trouble Sleeping"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_3")
+```
+
+### Item 4: Feeling Tired
+
+```{r}
+# Calculate models
+phq_4_model_1 <- lrm(data = df, formula = phq_4 ~ theta_fcm)
+phq_4_model_2 <- lrm(data = df, formula = phq_4 ~ theta_fcm + sample_hms)
+phq_4_model_3 <- lrm(data = df, formula = phq_4 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_4_model_1, phq_4_model_2, phq_4_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_4_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 4: Feeling Tired"
+  )
+
+plot_response_curves(phq_4_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 4: Feeling Tired"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_4")
+```
+
+### Item 5: Poor Appetite or Overeating
+
+```{r}
+# Calculate models
+phq_5_model_1 <- lrm(data = df, formula = phq_5 ~ theta_fcm)
+phq_5_model_2 <- lrm(data = df, formula = phq_5 ~ theta_fcm + sample_hms)
+phq_5_model_3 <- lrm(data = df, formula = phq_5 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_5_model_1, phq_5_model_2, phq_5_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_5_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 5: Poor Appetite or Overeating"
+  )
+
+plot_response_curves(phq_5_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 5: Poor Appetite or Overeating"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_5")
+```
+
+### Item 6: Feeling Bad About Yourself
+
+```{r}
+# Calculate models
+phq_6_model_1 <- lrm(data = df, formula = phq_6 ~ theta_fcm)
+phq_6_model_2 <- lrm(data = df, formula = phq_6 ~ theta_fcm + sample_hms)
+phq_6_model_3 <- lrm(data = df, formula = phq_6 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_6_model_1, phq_6_model_2, phq_6_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_6_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 6: Feeling Bad About Yourself"
+  )
+
+plot_response_curves(phq_6_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 6: Feeling Bad About Yourself"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_6")
+```
+
+### Item 7: Difficulty Concentrating
+
+```{r}
+# Calculate models
+phq_7_model_1 <- lrm(data = df, formula = phq_7 ~ theta_fcm)
+phq_7_model_2 <- lrm(data = df, formula = phq_7 ~ theta_fcm + sample_hms)
+phq_7_model_3 <- lrm(data = df, formula = phq_7 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_7_model_1, phq_7_model_2, phq_7_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_7_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 7: Difficulty Concentrating"
+  )
+
+plot_response_curves(phq_7_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 7: Difficulty Concentrating"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_7")
+```
+
+### Item 8: Psychomotor Symptoms
+
+```{r}
+# Calculate models
+phq_8_model_1 <- lrm(data = df, formula = phq_8 ~ theta_fcm)
+phq_8_model_2 <- lrm(data = df, formula = phq_8 ~ theta_fcm + sample_hms)
+phq_8_model_3 <- lrm(data = df, formula = phq_8 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_8_model_1, phq_8_model_2, phq_8_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_8_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 8: Psychomotor Symptoms"
+  )
+
+plot_response_curves(phq_8_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 8: Psychomotor Symptoms"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_8")
+```
+
+### Item 9: Suicidal Ideation
+
+```{r}
+# Calculate models
+phq_9_model_1 <- lrm(data = df, formula = phq_9 ~ theta_fcm)
+phq_9_model_2 <- lrm(data = df, formula = phq_9 ~ theta_fcm + sample_hms)
+phq_9_model_3 <- lrm(data = df, formula = phq_9 ~ theta_fcm * sample_hms)
+
+# Print models
+tidy_lrm_list(list(phq_9_model_1, phq_9_model_2, phq_9_model_3)) %>%
+  kable() %>%
+  kable_styling()
+
+# Print plots
+plot_mean_response(phq_9_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 9: Suicidal Ideation"
+  )
+
+plot_response_curves(phq_9_model_3) +
+  ggtitle(
+    "Predicted Item Response by Theta and Group",
+    "PHQ-9 Item 9: Suicidal Ideation"
+  )
+
+# Trying constrained model, per Paul's email
+release_and_test("phq_9")
+```
+
+### Combined plot
+
+```{r}
+min_theta <- min(df$theta_fcm)
+max_theta <- max(df$theta_fcm)
+
+out <- expand_grid(
+  theta_fcm = seq(min_theta, max_theta, .01),
+  sample_hms = c(0, 1)
+)
+
+predictions <- list(
+  phq_1_model_3,
+  phq_2_model_3,
+  phq_3_model_3,
+  phq_4_model_3,
+  phq_5_model_3,
+  phq_6_model_3,
+  phq_7_model_3,
+  phq_8_model_3,
+  phq_9_model_3
+) %>%
+  map(
+    .,
+    ~ predict(
+      object = .,
+      newdata = out,
+      type = "mean"
+    )
+  ) %>%
+  bind_cols() %>%
+  rename(
+    `Item 1: Anhedonia` = ...1,
+    `Item 2: Depressed Mood` = ...2,
+    `Item 3: Trouble Sleeping` = ...3,
+    `Item 4: Feeling Tired` = ...4,
+    `Item 5: Poor Appetite or Overeating` = ...5,
+    `Item 6: Feeling Bad About Yourself` = ...6,
+    `Item 7: Difficulty Concentrating` = ...7,
+    `Item 8: Psychomotor Symptoms` = ...8,
+    `Item 9: Suicidal Ideation` = ...9
+  )
+
+figure_1 <- out %>%
+  bind_cols(predictions) %>%
+  pivot_longer(
+    cols = starts_with("Item"),
+    names_to = "item",
+    values_to = "pred"
+  ) %>%
+  mutate(
+    sample_hms = case_match(
+      sample_hms, 
+      0 ~ "NHANES", 
+      1 ~ "HMS" 
+    )
+  ) %>%
+  ggplot() +
+  geom_line(
+    aes(theta_fcm, pred, group = sample_hms, color = sample_hms),
+    linewidth = 1
+  ) +
+  scale_x_continuous(
+    name = expression(paste("Estimated Depression (", theta, ")"))
+  ) +
+  scale_y_continuous(
+    name = "Predicted Response",
+    limits = c(0, 3),
+    breaks = 0:3,
+    labels = c("Not at all", "Several days", "More than half the days", "Nearly every day")
+  ) +
+  scale_color_discrete(
+    name = "Sample"
+  ) +
+  facet_wrap(
+    ~ item,
+    ncol = 3,
+    nrow = 3
+  ) +
+  theme_classic() +
+  ggtitle("Predicted Item Response by Theta and Group")
+
+figure_1
+
+ggsave(
+  filename = here("Figure 1.png"),
+  plot = figure_1,
+  width = 10,
+  height = 8,
+  units = "in"
+)
+```
+
+### Combined Table
+
+```{r}
+tidy_lrm_list(
+  list(
+    phq_1_model_2,
+    phq_2_model_2,
+    phq_3_model_2,
+    phq_4_model_2,
+    phq_5_model_2,
+    phq_6_model_2,
+    phq_7_model_2,
+    phq_8_model_2,
+    phq_9_model_2
+  )
+) %>%
+  drop_na() %>%
+  kable() %>%
+  kable_styling()
+```
+
+### Sum Score
+
+Total scores correspond very closely.
+
+```{r}
+# Linear model predicting sum score
+sum_score_model <- lm(data = df, formula = phq_sum ~ poly(scale(theta_fcm), 3) + sample_hms)
+sum_score_model %>%
+  tidy() %>%
+  kable(digits = 2) %>%
+  kable_styling()
+
+# Plot using smoother
+df %>%
+  ggplot() +
+  geom_smooth(
+    aes(theta_fcm, phq_sum, group = sample_char, color = sample_char),
+    method = "gam", # Generalized additive model via mgcv::gam()
+    formula = y ~ s(x, bs = "cs"),
+    se = F
+  ) +
+  scale_x_continuous(name = expression(paste("Estimated Depression (", theta, ")"))) +
+  scale_y_continuous(name = "PHQ-9 Sum Score") +
+  scale_color_discrete(name = "Sample") +
+  ggtitle("Predicted PHQ-9 Sum Score by Theta and Group") +
+  theme_classic()
+
+# Logistic models predicting categorical cutoff don't seem to fit well, as quadratic
+# terms resulted in predicted values of 1 or 0 (probably because of high R2)... 
+# but based on the geom_smooth() above I think it's safe to say this isn't a problem
+```
+
+### Exploratory: What if we hold the core symptoms constant, but allow all others to vary?
+
+```{r}
+core_symptom_model <- multipleGroup(
+  data = df[, 1:9],
+  model = 1,
+  group = df$sample_char,
+  invariance = c("phq_1", "phq_2"),
+  verbose = F
+)
+
+# coef(core_symptom_model)
+
+df$theta_csm <- as.numeric(fscores(core_symptom_model))
+
+# Correlations between thetas across models
+df %>%
+  select(starts_with("theta")) %>%
+  cor() %>%
+  kable() %>%
+  kable_styling()
+
+# Differences in this model
+df %>%
+  mutate(theta_change = theta_csm - theta_fcm) %>%
+  group_by(sample_char) %>%
+  summarize(
+    mean_change = mean(theta_change),
+    significant_change = mean(theta_change > .3)
+  ) %>%
+  kable() %>%
+  kable_styling()
+
+# Logistic models
+"phq_" %+% 1:9 %>%
+  map(.,
+      ~ lrm(
+        data = df,
+        formula = as.formula(. %+% " ~ theta_csm + sample_hms")
+      )) %>%
+  tidy_lrm_list(theta = "theta_csm") %>%
+  drop_na() %>%
+  kable() %>%
+  kable_styling()
+```
