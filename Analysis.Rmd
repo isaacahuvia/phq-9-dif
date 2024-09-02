@@ -576,7 +576,7 @@ plot_response_curves(phq_9_model_3) +
 release_and_test("phq_9")
 ```
 
-### Combined plot
+### Combined plot: Means
 
 ```{r}
 min_theta <- min(df$theta_fcm)
@@ -642,7 +642,7 @@ figure_1 <- out %>%
     name = expression(paste("Estimated Depression (", theta, ")"))
   ) +
   scale_y_continuous(
-    name = "Predicted Response",
+    name = NULL,
     limits = c(0, 3),
     breaks = 0:3,
     labels = c("Not at all", "Several days", "More than half the days", "Nearly every day")
@@ -665,6 +665,101 @@ ggsave(
   plot = figure_1,
   width = 10,
   height = 8,
+  units = "in"
+)
+```
+
+### Combined plot: Probabilities
+
+```{r}
+min_theta <- min(df$theta_fcm)
+max_theta <- max(df$theta_fcm)
+
+out <- expand_grid(
+  theta_fcm = seq(min_theta, max_theta, .01),
+  sample_hms = c(0, 1)
+)
+
+predictions <- list(
+  phq_1_model_3,
+  phq_2_model_3,
+  phq_3_model_3,
+  phq_4_model_3,
+  phq_5_model_3,
+  phq_6_model_3,
+  phq_7_model_3,
+  phq_8_model_3,
+  phq_9_model_3
+) %>%
+  map(
+    .,
+    ~ predict(
+      object = .,
+      newdata = out,
+      type = "fitted.ind"
+    )
+  ) %>%
+  bind_cols()
+
+figure_S1 <- out %>%
+  bind_cols(predictions) %>%
+  pivot_longer(
+    cols = starts_with("phq"),
+    names_to = "item_response",
+    values_to = "prob"
+  ) %>%
+  mutate(
+    item = str_extract(item_response, ".*(?=\\=)"),
+    response = str_extract(item_response, "(?<=\\=).*") %>%
+      case_match(
+        "0" ~ "Not at all",
+        "1" ~ "Several days",
+        "2" ~ "More than half the days",
+        "3" ~ "Nearly every day"
+      ),
+    sample_hms = case_match(
+      sample_hms, 
+      0 ~ "NHANES", 
+      1 ~ "HMS" 
+    )
+  ) %>%
+  # Calculate highpoint for dotted line
+  group_by(sample_hms, item, response) %>%
+  mutate(highpoint = theta_fcm[prob == max(prob)]) %>%
+  ggplot() +
+  geom_line(
+    aes(theta_fcm, prob, group = response, color = response),
+    linewidth = .5
+  ) +
+  geom_vline(
+    aes(xintercept = highpoint, group = response, color = response),
+    linewidth = .5,
+    linetype = "dashed"
+  ) +
+  scale_x_continuous(
+    name = expression(paste("Estimated Depression (", theta, ")"))
+  ) +
+  scale_y_continuous(
+    name = "P(Response)",
+    limits = c(0, 1)
+  ) +
+  scale_color_discrete(
+    name = "Response"
+  ) +
+  facet_grid(
+    rows = vars(sample_hms),
+    cols = vars(item)
+  ) +
+  theme_classic() +
+  ggtitle("Probability of Item Response by Theta and Group")
+
+figure_S1
+
+ggsave(
+  filename = here("Figure S1.png"),
+  plot = figure_S1,
+  width = 14,
+  height = 5,
   units = "in"
 )
 ```
