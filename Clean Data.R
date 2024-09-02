@@ -19,7 +19,6 @@ hms_data <- here("Data", "HMS", "HMS_2022-2023_PUBLIC_instchars.csv") %>%
   mutate(
     across(starts_with("phq"), ~ . - 1),
     phq_sum = phq9_1 + phq9_2 + phq9_3 + phq9_4 + phq9_5 + phq9_6 + phq9_7 + phq9_8 + phq9_9,
-    scaled_weight = as.numeric(scale(nrweight)),
     sample_hms = 1,
     sample_char = "HMS"
   ) %>%
@@ -36,7 +35,7 @@ hms_data <- here("Data", "HMS", "HMS_2022-2023_PUBLIC_instchars.csv") %>%
     phq_sum,
     sample_hms,
     sample_char,
-    scaled_weight
+    weight = nrweight
   )
 
 
@@ -94,7 +93,6 @@ nhanes_data <- left_join(
   by = "nhanes_id"
 ) %>%
   mutate(
-    scaled_weight = as.numeric(scale(weight)),
     sample_hms = 0,
     sample_char = "NHANES"
   ) %>%
@@ -102,7 +100,7 @@ nhanes_data <- left_join(
     starts_with("phq"),
     sample_hms,
     sample_char,
-    scaled_weight
+    weight
   )
 
 

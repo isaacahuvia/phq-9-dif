@@ -749,3 +749,65 @@ df %>%
   kable() %>%
   kable_styling()
 ```
+
+### Exploratory: What if we use PHQ-2 sum score as our "theta"?
+
+```{r}
+df$core_symptom_sum <- df$phq_1 + df$phq_2
+
+# Correlations between sum scores and thetas
+df %>%
+  select(core_symptom_sum, phq_sum, starts_with("theta")) %>%
+  cor() %>%
+  kable() %>%
+  kable_styling()
+
+# Logistic models
+"phq_" %+% 1:9 %>%
+  map(.,
+      ~ lrm(
+        data = df,
+        formula = as.formula(. %+% " ~ core_symptom_sum + sample_hms")
+      )) %>%
+  tidy_lrm_list(theta = "core_symptom_sum") %>%
+  drop_na() %>%
+  kable() %>%
+  kable_styling()
+```
+
+Do we get different estimates of depression using PHQ-9 and PHQ-2 cutoffs?
+
+```{r}
+library(survey)
+
+df <- df %>%
+  mutate(
+    across(
+      all_of("phq_" %+% 1:9),
+      ~ . >= 2,
+      .names = "{.col}_bin"
+    ),
+    elevated_symptoms_total = phq_1_bin + phq_2_bin + phq_3_bin + phq_4_bin + phq_5_bin + phq_6_bin + phq_7_bin + phq_8_bin + phq_9_bin,
+    elevated_core_symptoms = phq_1_bin + phq_2_bin,
+    diagnostic_algorithm = elevated_symptoms_total >= 5 & elevated_core_symptoms >= 1
+  )
+
+df_weights <- df %>%
+  drop_na(weight)
+
+design <- svydesign(
+  data = df_weights,
+  ids = ~ 0,
+  strata = ~ sample_char,
+  weights = ~ weight
+)
+
+svyby(~ phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties vs diagnostic interviews (1)
+svyby(~ core_symptom_sum >= 3, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties (2)
+svyby(~ core_symptom_sum >= 3 & phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Even better properties (2) 
+svyby(~ diagnostic_algorithm, ~ sample_char, design, svyciprop, vartype = "ci") # Not recommended (1) (3)
+
+# (1) https://karger.com/pps/article/89/1/25/289799/The-Accuracy-of-the-Patient-Health-Questionnaire-9
+# (2) https://jamanetwork.com/journals/jama/article-abstract/2766865
+# (3) https://www.sciencedirect.com/science/article/abs/pii/S0163834314002540?via%3Dihub
+```
