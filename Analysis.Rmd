@@ -36,6 +36,46 @@ pull_scaled_theta <- function(model) {
   
 }
 
+average_difference <- function(model, theta = "theta_fcm") {
+  
+  class <- class(model)
+  
+  min_theta <- min(df[[theta]])
+  max_theta <- max(df[[theta]])
+  
+  out <- expand_grid(
+    theta_temp = seq(min_theta, max_theta, .01),
+    sample_hms = c(0, 1)
+  )
+  
+  names(out)[names(out) == "theta_temp"] <- theta
+  
+  predictions <- predict(
+    object = model,
+    newdata = out,
+    type = if_else(
+      "lm" %in% class,
+      "response",
+      "mean"
+    )
+  )
+  
+  out %>%
+    bind_cols(predictions) %>%
+    rename(predicted_score = `...3`) %>%
+    pivot_wider(
+      names_from = "sample_hms",
+      values_from = "predicted_score"
+    ) %>%
+    mutate(difference = `1` - `0`) %>%
+    summarize(
+      average_difference = mean(difference),
+      average_unsigned_difference = mean(abs(difference))
+    ) %>%
+    return()
+  
+}
+
 plot_mean_response <- function(model, theta = "theta_fcm") {
   
   class <- class(model)
@@ -243,10 +283,14 @@ release_and_test <- function(item, theta = "theta_fcm") {
     verbose = F
   )
   
+  theta_original <- df[[theta]]
   theta_released <- pull_scaled_theta(released_model)
   
-  print("Correlation between released theta and original theta: " %+% round(cor(df[[theta]], theta_released), 2))
-  print("Proportion of participants whose theta changes more than .3 units: " %+% percent(mean((df[[theta]] - theta_released) > .3), .1))
+  difference <- theta_original - theta_released
+
+  print("Average difference: " %+% round(mean(difference), 2))
+  print("Average unsigned difference: " %+% round(mean(abs(difference)), 2))
+  print("Proportion of participants whose theta changes more than .3 units: " %+% percent(mean(difference >= .3), .1))
   
 }
 ```
@@ -264,21 +308,6 @@ dif <- lordif(
   R2.change = .02
   # weights = df$scaled_weight
 )
-```
-
-```{r}
-# Table 1
-dif %>%
-  summary() %>%
-  pluck("stats") %>%
-  select(item, chi12, chi23, beta12, pseudo12.Nagelkerke, pseudo23.Nagelkerke) %>%
-  mutate(
-    across(c(chi12, chi23), ~ round(., 3)),
-    beta12 = percent(beta12, .1),
-    across(c(pseudo12.Nagelkerke, pseudo23.Nagelkerke), ~ round(., 3))
-  ) %>%
-  kable() %>%
-  kable_styling()
 
 # Pull theta
 df$theta_lordif <- as.numeric(dif$calib$theta)
@@ -302,6 +331,22 @@ df$theta_fcm <- pull_scaled_theta(fully_constrained_model)
 df %>%
   select(phq_sum, theta_lordif, theta_fcm) %>%
   cor() %>%
+  kable() %>%
+  kable_styling()
+```
+
+### Table 1. Results of Differential Item Functioning Tests.
+
+```{r}
+dif %>%
+  summary() %>%
+  pluck("stats") %>%
+  select(item, chi12, chi23, beta12, pseudo12.Nagelkerke, pseudo23.Nagelkerke) %>%
+  mutate(
+    across(c(chi12, chi23), ~ round(., 3)),
+    beta12 = percent(beta12, .1),
+    across(c(pseudo12.Nagelkerke, pseudo23.Nagelkerke), ~ round(., 3))
+  ) %>%
   kable() %>%
   kable_styling()
 ```
@@ -332,7 +377,8 @@ plot_response_curves(phq_1_model_3) +
     "PHQ-9 Item 1: Anhedonia"
   )
 
-# Measure change in theta in constrained model
+# Estimate magnitude
+average_difference(phq_1_model_3)
 release_and_test("phq_1")
 ```
 
@@ -362,7 +408,8 @@ plot_response_curves(phq_2_model_3) +
     "PHQ-9 Item 2: Depressed Mood"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_2_model_3)
 release_and_test("phq_2")
 ```
 
@@ -392,7 +439,8 @@ plot_response_curves(phq_3_model_3) +
     "PHQ-9 Item 3: Trouble Sleeping"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_3_model_3)
 release_and_test("phq_3")
 ```
 
@@ -422,7 +470,8 @@ plot_response_curves(phq_4_model_3) +
     "PHQ-9 Item 4: Feeling Tired"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_4_model_3)
 release_and_test("phq_4")
 ```
 
@@ -452,7 +501,8 @@ plot_response_curves(phq_5_model_3) +
     "PHQ-9 Item 5: Poor Appetite or Overeating"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_5_model_3)
 release_and_test("phq_5")
 ```
 
@@ -482,7 +532,8 @@ plot_response_curves(phq_6_model_3) +
     "PHQ-9 Item 6: Feeling Bad About Yourself"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_6_model_3)
 release_and_test("phq_6")
 ```
 
@@ -512,7 +563,8 @@ plot_response_curves(phq_7_model_3) +
     "PHQ-9 Item 7: Difficulty Concentrating"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_7_model_3)
 release_and_test("phq_7")
 ```
 
@@ -542,7 +594,8 @@ plot_response_curves(phq_8_model_3) +
     "PHQ-9 Item 8: Psychomotor Symptoms"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_8_model_3)
 release_and_test("phq_8")
 ```
 
@@ -572,11 +625,33 @@ plot_response_curves(phq_9_model_3) +
     "PHQ-9 Item 9: Suicidal Ideation"
   )
 
-# Trying constrained model, per Paul's email
+# Estimate magnitude
+average_difference(phq_9_model_3)
 release_and_test("phq_9")
 ```
 
-### Combined plot: Means
+### Table 2. Results of Logistic Regressions Predicting Item Response.
+
+```{r}
+tidy_lrm_list(
+  list(
+    phq_1_model_2,
+    phq_2_model_2,
+    phq_3_model_2,
+    phq_4_model_2,
+    phq_5_model_2,
+    phq_6_model_2,
+    phq_7_model_2,
+    phq_8_model_2,
+    phq_9_model_2
+  )
+) %>%
+  drop_na() %>%
+  kable() %>%
+  kable_styling()
+```
+
+### Figure 1. Item Score Functions by Group.
 
 ```{r}
 min_theta <- min(df$theta_fcm)
@@ -655,8 +730,7 @@ figure_1 <- out %>%
     ncol = 3,
     nrow = 3
   ) +
-  theme_classic() +
-  ggtitle("Predicted Item Response by Theta and Group")
+  theme_classic()
 
 figure_1
 
@@ -669,7 +743,53 @@ ggsave(
 )
 ```
 
-### Combined plot: Probabilities
+### Scale Score
+
+```{r}
+# Linear model predicting sum score
+sum_score_model <- lm(data = df, formula = phq_sum ~ poly(theta_fcm, 4) * sample_hms)
+sum_score_model %>%
+  tidy() %>%
+  kable(digits = 2) %>%
+  kable_styling()
+
+# Estimate impact
+average_difference(sum_score_model)
+```
+
+### Figure 2. Scale Score Functions by Group.
+
+```{r}
+# Plot using smoother
+figure_2 <- df %>%
+  ggplot() +
+  geom_smooth(
+    aes(theta_fcm, phq_sum, group = sample_char, color = sample_char),
+    method = "lm",
+    formula = y ~ poly(x, 4),
+    se = F
+  ) +
+  scale_x_continuous(name = expression(paste("Estimated Depression (", theta, ")"))) +
+  scale_y_continuous(name = "PHQ-9 Sum Score") +
+  scale_color_discrete(name = "Sample") +
+  theme_classic()
+
+figure_2
+
+ggsave(
+  filename = here("Figure 2.png"),
+  plot = figure_2,
+  width = 6,
+  height = 5,
+  units = "in"
+)
+
+# Logistic models predicting categorical cutoff don't seem to fit well, as quadratic
+# terms resulted in predicted values of 1 or 0 (probably because of high R2)... 
+# but based on the geom_smooth() above I think it's safe to say this isn't a problem
+```
+
+### Figure S1. Item Response Functions by Group.
 
 ```{r}
 min_theta <- min(df$theta_fcm)
@@ -750,8 +870,7 @@ figure_S1 <- out %>%
     rows = vars(sample_hms),
     cols = vars(item)
   ) +
-  theme_classic() +
-  ggtitle("Probability of Item Response by Theta and Group")
+  theme_classic()
 
 figure_S1
 
@@ -764,57 +883,42 @@ ggsave(
 )
 ```
 
-### Combined Table
+### Testing Prevalence
 
 ```{r}
-tidy_lrm_list(
-  list(
-    phq_1_model_2,
-    phq_2_model_2,
-    phq_3_model_2,
-    phq_4_model_2,
-    phq_5_model_2,
-    phq_6_model_2,
-    phq_7_model_2,
-    phq_8_model_2,
-    phq_9_model_2
+library(survey)
+
+df <- df %>%
+  mutate(
+    core_symptoms_sum = phq_1 + phq_2,
+    across(
+      all_of("phq_" %+% 1:9),
+      ~ . >= 2,
+      .names = "{.col}_bin"
+    ),
+    elevated_symptoms_total = phq_1_bin + phq_2_bin + phq_3_bin + phq_4_bin + phq_5_bin + phq_6_bin + phq_7_bin + phq_8_bin + phq_9_bin,
+    elevated_core_symptoms = phq_1_bin + phq_2_bin,
+    diagnostic_algorithm = elevated_symptoms_total >= 5 & elevated_core_symptoms >= 1
   )
-) %>%
-  drop_na() %>%
-  kable() %>%
-  kable_styling()
-```
 
-### Sum Score
+df_weights <- df %>%
+  drop_na(weight)
 
-Total scores correspond very closely.
+design <- svydesign(
+  data = df_weights,
+  ids = ~ 0,
+  strata = ~ sample_char,
+  weights = ~ weight
+)
 
-```{r}
-# Linear model predicting sum score
-sum_score_model <- lm(data = df, formula = phq_sum ~ poly(scale(theta_fcm), 3) + sample_hms)
-sum_score_model %>%
-  tidy() %>%
-  kable(digits = 2) %>%
-  kable_styling()
+svyby(~ phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties vs diagnostic interviews (1)
+svyby(~ core_symptoms_sum >= 3, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties (2)
+svyby(~ core_symptoms_sum >= 3 & phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Even better properties (2) 
+svyby(~ diagnostic_algorithm, ~ sample_char, design, svyciprop, vartype = "ci") # Not recommended (1) (3)
 
-# Plot using smoother
-df %>%
-  ggplot() +
-  geom_smooth(
-    aes(theta_fcm, phq_sum, group = sample_char, color = sample_char),
-    method = "gam", # Generalized additive model via mgcv::gam()
-    formula = y ~ s(x, bs = "cs"),
-    se = F
-  ) +
-  scale_x_continuous(name = expression(paste("Estimated Depression (", theta, ")"))) +
-  scale_y_continuous(name = "PHQ-9 Sum Score") +
-  scale_color_discrete(name = "Sample") +
-  ggtitle("Predicted PHQ-9 Sum Score by Theta and Group") +
-  theme_classic()
-
-# Logistic models predicting categorical cutoff don't seem to fit well, as quadratic
-# terms resulted in predicted values of 1 or 0 (probably because of high R2)... 
-# but based on the geom_smooth() above I think it's safe to say this isn't a problem
+# (1) https://karger.com/pps/article/89/1/25/289799/The-Accuracy-of-the-Patient-Health-Questionnaire-9
+# (2) https://jamanetwork.com/journals/jama/article-abstract/2766865
+# (3) https://www.sciencedirect.com/science/article/abs/pii/S0163834314002540?via%3Dihub
 ```
 
 ### Exploratory: What if we hold the core symptoms constant, but allow all others to vary?
@@ -886,41 +990,4 @@ df %>%
   drop_na() %>%
   kable() %>%
   kable_styling()
-```
-
-Do we get different estimates of depression using PHQ-9 and PHQ-2 cutoffs?
-
-```{r}
-library(survey)
-
-df <- df %>%
-  mutate(
-    across(
-      all_of("phq_" %+% 1:9),
-      ~ . >= 2,
-      .names = "{.col}_bin"
-    ),
-    elevated_symptoms_total = phq_1_bin + phq_2_bin + phq_3_bin + phq_4_bin + phq_5_bin + phq_6_bin + phq_7_bin + phq_8_bin + phq_9_bin,
-    elevated_core_symptoms = phq_1_bin + phq_2_bin,
-    diagnostic_algorithm = elevated_symptoms_total >= 5 & elevated_core_symptoms >= 1
-  )
-
-df_weights <- df %>%
-  drop_na(weight)
-
-design <- svydesign(
-  data = df_weights,
-  ids = ~ 0,
-  strata = ~ sample_char,
-  weights = ~ weight
-)
-
-svyby(~ phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties vs diagnostic interviews (1)
-svyby(~ core_symptom_sum >= 3, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties (2)
-svyby(~ core_symptom_sum >= 3 & phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Even better properties (2) 
-svyby(~ diagnostic_algorithm, ~ sample_char, design, svyciprop, vartype = "ci") # Not recommended (1) (3)
-
-# (1) https://karger.com/pps/article/89/1/25/289799/The-Accuracy-of-the-Patient-Health-Questionnaire-9
-# (2) https://jamanetwork.com/journals/jama/article-abstract/2766865
-# (3) https://www.sciencedirect.com/science/article/abs/pii/S0163834314002540?via%3Dihub
 ```
