@@ -15,14 +15,39 @@ hms_data <- here("Data", "HMS", "HMS_2025-2026_PUBLIC_instchars.csv") %>%
   vroom(
     col_select = c(
       nrweight,
-      starts_with("phq9")
+      starts_with("phq9"),
+      age,
+      starts_with("gender_"),
+      starts_with("race_"),
+      psu = schoolnum
     )
   ) %>%
   mutate(
     across(starts_with("phq"), ~ . - 1),
     phq_sum = phq9_1 + phq9_2 + phq9_3 + phq9_4 + phq9_5 + phq9_6 + phq9_7 + phq9_8 + phq9_9,
     sample_hms = 1,
-    sample_char = "HMS"
+    sample_char = "HMS",
+    n_gender = rowSums(!is.na(pick(starts_with("gender_")))),
+    gender = case_when(
+      n_gender > 1 ~ "TGD",
+      n_gender == 1 & gender_male == 1 ~ "Cisgender Male",
+      n_gender == 1 & gender_female == 1 ~ "Cisgender Female",
+      n_gender == 1 & is.na(gender_male) & is.na(gender_female) ~ "TGD",
+      T ~ NA_character_
+    ),
+    n_race = rowSums(!is.na(pick(starts_with("race_")))),
+    race = case_when(
+      n_race > 1 ~ "Multiracial/Other",
+      n_race == 1 & race_black == 1 ~ "Black",
+      n_race == 1 & race_ainaan == 1 ~ "American Indian/Alaska Native",
+      n_race == 1 & race_asian == 1 ~ "Asian",
+      n_race == 1 & race_his == 1 ~ "Hispanic",
+      n_race == 1 & race_pi == 1 ~ "Pacific Islander",
+      n_race == 1 & race_mides == 1 ~ "Middle-Eastern",
+      n_race == 1 & race_white == 1 ~ "White",
+      race_other == 1 ~ "Multiracial/Other",
+      T ~ NA_character_
+    )
   ) %>%
   select(
     phq_1 = phq9_1,
@@ -37,7 +62,11 @@ hms_data <- here("Data", "HMS", "HMS_2025-2026_PUBLIC_instchars.csv") %>%
     phq_sum,
     sample_hms,
     sample_char,
-    weight = nrweight
+    weight = nrweight,
+    psu,
+    age,
+    gender,
+    race
   )
 
 
@@ -55,11 +84,12 @@ nhanes_demo_data <- nhanes_demo_files %>%
   select(
     nhanes_id = SEQN,
     nhanes_yr = SDDSRVYR,
+    age = RIDAGEYR,
     gender = RIAGENDR,
     race = RIDRETH3,
-    age = RIDAGEYR,
-    income = INDFMPIR,
-    weight = WTINTPRP
+    psu = SDMVPSU,
+    strata = SDMVSTRA,
+    WTMEC2YR, WTMECPRP
   ) %>%
   filter(age >= 18) %>%
   mutate(
@@ -70,6 +100,23 @@ nhanes_demo_data <- nhanes_demo_files %>%
       9 ~ "2015-2016",
       66 ~ "2017-2020",
       12 ~ "2021-2023"
+    ),
+    gender = recode_values(
+      gender,
+      1 ~ "Male",
+      2 ~ "Female"
+    ),
+    race = recode_values(
+      race,
+      c(1, 2) ~ "Hispanic",
+      3 ~ "White",
+      4 ~ "Black",
+      6 ~ "Asian",
+      7 ~ "Multiracial/Other"
+    ),
+    weight = case_when(
+      nhanes_yr %in% c("2011-2012", "2013-2014", "2015-2016", "2021-2023") ~ WTMEC2YR,
+      nhanes_yr == "2017-2020" ~ WTMECPRP
     )
   )
 
@@ -115,7 +162,13 @@ nhanes_data <- left_join(
     sample_hms,
     sample_char,
     nhanes_yr,
-    weight
+    nhanes_id,
+    psu,
+    strata,
+    weight,
+    age,
+    gender,
+    race
   )
 
 
@@ -124,6 +177,13 @@ combined_data <- bind_rows(
   hms_data,
   nhanes_data
 ) %>%
+  mutate(
+    most_recent_survey = case_when(
+      sample_char == "HMS" ~ T,
+      sample_char == "NHANES" & nhanes_yr == "2021-2023" ~ T,
+      T ~ F
+    )
+  ) %>%
   drop_na(phq_1, phq_2, phq_3, phq_4, phq_5, phq_6, phq_7, phq_8, phq_9)
 
 
