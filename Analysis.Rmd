@@ -2,6 +2,8 @@
 title: "PHQ-9 DIF Analysis"
 output: html_document
 date: "2024-09-01"
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r, include = F}
@@ -20,6 +22,7 @@ library(scales)
 library(tidyverse)
 `%+%` <- paste0
 
+conflicted::conflict_prefer_all("dplyr", quiet = T)
 
 ## Load data
 df <- readRDS(here("Data", "Clean Data.rds"))
@@ -201,7 +204,8 @@ or_lrm <- function(model) {
   
   coef <- model$coefficients
   
-  se <- model$var %>%
+  se <- model %>%
+    vcov() %>%
     diag() %>%
     sqrt()
   
@@ -333,6 +337,13 @@ df %>%
   cor() %>%
   kable() %>%
   kable_styling()
+
+# Are thetas on the same scale across groups?
+df %>%
+  ggplot(aes(phq_sum, theta_fcm, group = sample_char, color = sample_char)) +
+  geom_point(alpha = .1) +
+  geom_smooth() +
+  theme_classic() # I'd say so!
 ```
 
 ### Table 1. Results of Differential Item Functioning Tests.

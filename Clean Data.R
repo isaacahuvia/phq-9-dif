@@ -5,11 +5,13 @@ library(here)
 library(vroom)
 `%+%` <- paste0
 
+conflicted::conflict_prefer_all("dplyr", quiet = T)
+
 
 ### Load data
 ## HMS: Load most recent year
 # NOTE: Multiple years are available, but there is no way to deduplicate across years
-hms_data <- here("Data", "HMS", "HMS_2022-2023_PUBLIC_instchars.csv") %>%
+hms_data <- here("Data", "HMS", "HMS_2025-2026_PUBLIC_instchars.csv") %>%
   vroom(
     col_select = c(
       nrweight,
@@ -50,15 +52,26 @@ nhanes_demo_data <- nhanes_demo_files %>%
       read_xpt()
   ) %>%
   bind_rows(.id = "file") %>%
-  dplyr::select(
+  select(
     nhanes_id = SEQN,
+    nhanes_yr = SDDSRVYR,
     gender = RIAGENDR,
     race = RIDRETH3,
     age = RIDAGEYR,
     income = INDFMPIR,
     weight = WTINTPRP
   ) %>%
-  filter(age >= 18)
+  filter(age >= 18) %>%
+  mutate(
+    nhanes_yr = recode_values(
+      nhanes_yr,
+      7 ~ "2011-2012",
+      8 ~ "2013-2014",
+      9 ~ "2015-2016",
+      66 ~ "2017-2020",
+      12 ~ "2021-2023"
+    )
+  )
 
 # Load and bind PHQ-9 files
 nhanes_phq_files <- list.files(here("Data", "NHANES", "PHQ"), full.names = T)
@@ -101,6 +114,7 @@ nhanes_data <- left_join(
     starts_with("phq"),
     sample_hms,
     sample_char,
+    nhanes_yr,
     weight
   )
 
