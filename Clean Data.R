@@ -32,7 +32,7 @@ hms_data <- here("Data", "HMS", "HMS_2025-2026_PUBLIC_instchars.csv") %>%
       n_gender > 1 ~ "TGD",
       n_gender == 1 & gender_male == 1 ~ "Cisgender Male",
       n_gender == 1 & gender_female == 1 ~ "Cisgender Female",
-      n_gender == 1 & is.na(gender_male) & is.na(gender_female) ~ "TGD",
+      (!is.na(gender_trans) | !is.na(gender_nonbin) | !is.na(gender_nonconf) | !is.na(gender_selfID)) ~ "TGD",
       T ~ NA_character_
     ),
     n_race = rowSums(!is.na(pick(starts_with("race_")))),
