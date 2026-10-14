@@ -1,12 +1,17 @@
 ---
 title: "PHQ-9 DIF Analysis"
 output: html_document
-date: "2024-09-01"
+date: "`r Sys.Date()`"
 editor_options: 
   chunk_output_type: console
 ---
 
-```{r, include = F}
+```{r startup, include = F}
+## Set chunk options
+knitr::opts_chunk$set(
+  cache.extra = tools::md5sum(here::here("Data", "Clean Data.rds")) # Some chunks cache objects; reset them if Clean Data.rds changes
+)
+
 ## Set seed
 set.seed(57135)
 
@@ -14,991 +19,914 @@ set.seed(57135)
 ## Load packages
 library(here)
 library(lordif)
-library(ltm)
+library(rms)
 library(mirt)
 library(kableExtra)
 library(broom)
 library(scales)
+library(survey)
 library(tidyverse)
 `%+%` <- paste0
 
 conflicted::conflict_prefer_all("dplyr", quiet = T)
 
+
 ## Load data
 df <- readRDS(here("Data", "Clean Data.rds"))
 
 
-## Custom functions
-pull_scaled_theta <- function(model) {
-  
-  model %>%
-    fscores() %>%
-    scale() %>%
-    as.numeric() %>%
-    return()
-  
-}
+## Set global variables
+phq_items <- "phq_" %+% 1:9
 
-average_difference <- function(model, theta = "theta_fcm") {
-  
-  class <- class(model)
-  
-  min_theta <- min(df[[theta]])
-  max_theta <- max(df[[theta]])
-  
-  out <- expand_grid(
-    theta_temp = seq(min_theta, max_theta, .01),
-    sample_hms = c(0, 1)
-  )
-  
-  names(out)[names(out) == "theta_temp"] <- theta
-  
-  predictions <- predict(
-    object = model,
-    newdata = out,
-    type = if_else(
-      "lm" %in% class,
-      "response",
-      "mean"
+groups <- c("HMS", "NHANES")
+
+item_labels <- c(
+  phq_1 = "1. Anhedonia",
+  phq_2 = "2. Depressed mood",
+  phq_3 = "3. Sleep",
+  phq_4 = "4. Fatigue",
+  phq_5 = "5. Appetite",
+  phq_6 = "6. Feeling bad about self",
+  phq_7 = "7. Concentration",
+  phq_8 = "8. Psychomotor",
+  phq_9 = "9. Suicidal ideation"
+)
+ 
+response_labels <- c(
+  "0" = "Not at all",
+  "1" = "Several days",
+  "2" = "More than half the days",
+  "3" = "Nearly every day"
+)
+
+
+## Set visual style
+sample_colors <- c("NHANES" = "#0072B2", "HMS" = "#D55E00")
+
+response_colors <- c("#E0E0E0", "#A6A6A6", "#6E6E6E", "#333333")
+ 
+theme_style <- function(base_size = 9) {
+  theme_classic(base_size = base_size) +
+    theme(
+      legend.position = "top",
+      legend.justification = "left",
+      legend.title = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(hjust = 0),
+      panel.spacing = unit(10, "pt")
     )
-  )
-  
-  out %>%
-    bind_cols(predictions) %>%
-    rename(predicted_score = `...3`) %>%
-    pivot_wider(
-      names_from = "sample_hms",
-      values_from = "predicted_score"
-    ) %>%
-    mutate(difference = `1` - `0`) %>%
-    summarize(
-      average_difference = mean(difference),
-      average_unsigned_difference = mean(abs(difference))
-    ) %>%
-    return()
-  
 }
 
-plot_mean_response <- function(model, theta = "theta_fcm") {
-  
-  class <- class(model)
-  
-  min_theta <- min(df[[theta]])
-  max_theta <- max(df[[theta]])
-  
-  out <- expand_grid(
-    theta_temp = seq(min_theta, max_theta, .01),
-    sample_hms = c(0, 1)
-  )
-  
-  names(out)[names(out) == "theta_temp"] <- theta
-  
-  predictions <- predict(
-    object = model,
-    newdata = out,
-    type = if_else(
-      "lm" %in% class,
-      "response",
-      "mean"
-    )
-  )
-  
-  out$pred <- predictions
-  
-  plot <- out %>%
-    mutate(
-      sample_hms = case_match(
-        sample_hms, 
-        0 ~ "NHANES", 
-        1 ~ "HMS" 
-      )
-    ) %>%
-    ggplot() +
-    geom_line(
-      aes(.data[[theta]], pred, group = sample_hms, color = sample_hms),
-      linewidth = 1
-    ) +
-    scale_x_continuous(
-      name = expression(paste("Estimated Depression (", theta, ")"))
-    ) +
-    scale_color_discrete(
-      name = "Sample"
-    ) +
-    theme_classic()
-  
-  if(any("lrm" %in% class)) {
-    
-    plot <- plot + 
-        scale_y_continuous(
-        name = "Predicted Response",
-        limits = c(0, 3),
-        breaks = 0:3,
-        labels = c("Not at all", "Several days", "More than half the days", "Nearly every day")
-      )
-    
-  }
-  
-  return(plot)
-  
-}
 
-plot_response_curves <- function(model, theta = "theta_fcm") {
-  
-  min_theta <- min(df[[theta]])
-  max_theta <- max(df[[theta]])
-  
-  out <- expand_grid(
-    theta_temp = seq(min_theta, max_theta, .01),
-    sample_hms = c(0, 1)
+## Set helper functions
+save_figure <- function(plot, name, height, width = 7) {
+  ggsave(
+    filename = here("Figure - " %+% name %+% ".png"),
+    plot = plot,
+    width = width,
+    height = height,
+    units = "in",
+    dpi = 600,
+    bg = "white"
   )
-  
-  names(out)[names(out) == "theta_temp"] <- theta
-  
-  predictions <- predict(
-    object = model,
-    newdata = out,
-    type = "fitted.ind"
-  )
-  
-  out$pred_0 <- as.numeric(predictions[, 1])
-  out$pred_1 <- as.numeric(predictions[, 2])
-  out$pred_2 <- as.numeric(predictions[, 3])
-  out$pred_3 <- as.numeric(predictions[, 4])
-  
-  plot <- out %>%
-    mutate(
-      sample_hms = case_match(
-        sample_hms, 
-        0 ~ "NHANES", 
-        1 ~ "HMS" 
-      )
-    ) %>%
-    pivot_longer(
-      cols = c("pred_0", "pred_1", "pred_2", "pred_3"),
-      names_to = "response_level",
-      values_to = "prob"
-    ) %>%
-    ggplot() +
-    geom_line(
-      aes(.data[[theta]], prob, group = response_level, color = response_level),
-      linewidth = 1
-    ) +
-    scale_x_continuous(
-      name = expression(paste("Estimated Depression (", theta, ")"))
-    ) +
-    scale_y_continuous(
-      name = "Probability"
-    ) +
-    scale_color_discrete(
-      name = "Response Level",
-      labels = c("Not at all", "Several days", "More than half the days", "Nearly every day")
-    ) +
-    facet_wrap(~ sample_hms, ncol = 1) +
-    theme_classic()
-  
-  return(plot)
-  
-}
-
-or_lrm <- function(model) {
-  
-  coef <- model$coefficients
-  
-  se <- model %>%
-    vcov() %>%
-    diag() %>%
-    sqrt()
-  
-  out <- tibble(
-    var = names(coef),
-    or = exp(coef),
-    high = exp(coef + (se * qnorm(.975))),
-    low = exp(coef + (se * qnorm(.025)))
-  )
-  
-  return(out)
-  
-}
-
-tidy_lrm <- function(model) {
-  
-  r2 <- tibble(
-    var = "R2",
-    or = model$stats[["R2"]] %>%
-      round(3) %>%
-      as.character()
-  )
-  
-  model %>%
-    or_lrm() %>%
-    mutate(
-      or = paste0(
-        round(or, 2),
-        " (",
-        round(low, 2),
-        ", ",
-        round(high, 2),
-        ")"
-      )
-    ) %>%
-    select(var, or) %>%
-    bind_rows(r2) %>%
-    return()
-  
-}
-
-tidy_lrm_list <- function(model_list, theta = "theta_fcm") {
-  
-  out <- tibble(
-    var = c("y>=1", "y>=2", "y>=3", theta, "sample_hms", theta %+% " * sample_hms", "R2")
-  )
-  
-  tidy_output_1 <- tidy_lrm(
-    model_list[[1]]
-  )
-  
-  names(tidy_output_1)[names(tidy_output_1) == "or"] <- "or_1"
-    
-  out <- left_join(out, tidy_output_1, by = "var")
-  
-  for(i in 2:length(model_list)) {
-    
-    tidy_output_i <- tidy_lrm(
-      model_list[[i]]
-    )
-    
-    names(tidy_output_i)[names(tidy_output_i) == "or"] <- "or_" %+% i
-    
-    out <- left_join(out, tidy_output_i, by = "var")
-    
-  }
-  
-  return(out)
-  
-}
-
-release_and_test <- function(item, theta = "theta_fcm") {
-  
-  released_model <- multipleGroup(
-    data = df[, 1:9],
-    model = 1,
-    group = df$sample_char,
-    invariance = setdiff("phq_" %+% 1:9, item),
-    verbose = F
-  )
-  
-  theta_original <- df[[theta]]
-  theta_released <- pull_scaled_theta(released_model)
-  
-  difference <- theta_original - theta_released
-
-  print("Average difference: " %+% round(mean(difference), 2))
-  print("Average unsigned difference: " %+% round(mean(abs(difference)), 2))
-  print("Proportion of participants whose theta changes more than .3 units: " %+% percent(mean(difference >= .3), .1))
-  
 }
 ```
 
-## Global DIF Test
+# Sample description
 
-```{r, include = F}
-# Calculate DIF via lordif
-dif <- lordif(
-  resp.data = data.frame(df),
-  group = df$sample_hms,
-  selection = 1:9,
-  criterion = "R2",
-  pseudo.R2 = "Nagelkerke",
-  R2.change = .02
-  # weights = df$scaled_weight
-)
+```{r sample-description}
+## Sample sizes
+sample_n <- df %>%
+  count(sample_fct) %>%
+  mutate(label = sample_fct %+% " (n = " %+% comma(n) %+% ")")
+ 
 
-# Pull theta
-df$theta_lordif <- as.numeric(dif$calib$theta)
+## Sum score distribution
+sum_score_dist <- df %>%
+  count(sample_fct, phq_sum) %>%
+  group_by(sample_fct) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
 
-# In the absence of DIF, calculate fully constrained IRT model; thetas should match
-fully_constrained_model <- multipleGroup(
-  data = df[, 1:9],
-  model = 1,
-  group = df$sample_char,
-  invariance = "phq_" %+% 1:9,
-  method = "EM", # "Standard EM algorithm with fixed quadrature"
+
+## Sample labels and their positions on the distribution plot
+sum_score_labels <- tibble(
+  sample_fct = factor(c("NHANES", "HMS"), levels = c("NHANES", "HMS")),
+  phq_sum = c(1.6, 7.6),
+  prop = c(.2, .085)
+) %>%
+  left_join(select(sample_n, sample_fct, label), by = "sample_fct")
+
+
+## Distribution plot
+phq_distribution_plot <- sum_score_dist %>%
+  ggplot(aes(phq_sum, prop, color = sample_fct)) +
+  annotate(
+    "rect",
+    xmin = 10, xmax = 27, ymin = -Inf, ymax = Inf,
+    fill = "#F0F0F0"
+  ) +
+  annotate(
+    "text",
+    x = 10.2, y = .32, label = "Positive screen (≥ 10)",
+    hjust = 0, vjust = 1, size = 9 / .pt,
+    fontface = "italic"
+  ) +
+  geom_line(linewidth = .6) +
+  geom_point(size = .9) +
+  geom_text(
+    data = sum_score_labels,
+    aes(label = label),
+    hjust = 0, size = 8.5 / .pt
+  ) +
+  scale_colour_manual(values = sample_colors) +
+  scale_x_continuous(
+    name = "PHQ-9 sum score",
+    breaks = seq(0, 27, 3),
+    expand = expansion(add = c(.5, .5))
+  ) +
+  scale_y_continuous(
+    name = "Share of respondents",
+    labels = percent,
+    limits = c(0, .33),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  theme_style() +
+  theme(legend.position = "none")
+
+phq_distribution_plot
+ 
+save_figure(phq_distribution_plot, "PHQ Distribution by Group", height = 3.4)
+ 
+
+## Item response distributions
+item_dist <- df %>%
+  select(sample_fct, all_of(phq_items)) %>%
+  pivot_longer(
+    cols = all_of(phq_items),
+    names_to = "item",
+    values_to = "response"
+  ) %>%
+  count(sample_fct, item, response) %>%
+  group_by(sample_fct, item) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  mutate(
+    item = factor(item_labels[item], levels = rev(item_labels)), # So that item 1 is at the top
+    response = factor(response, levels = 3:0, labels = rev(response_labels)) # So that "not at all" is on the left
+  )
+
+item_response_plot <- item_dist %>%
+  ggplot(aes(prop, item, fill = response)) +
+  geom_col(width = .75, colour = "white", linewidth = .25) +
+  facet_wrap(
+    ~ sample_fct,
+    nrow = 1,
+    labeller = as_labeller(setNames(sample_n$label, sample_n$sample_fct))
+  ) +
+  scale_fill_manual(
+    name = NULL,
+    values = setNames(response_colors, response_labels),
+    breaks = unname(response_labels)
+  ) +
+  scale_x_continuous(
+    name = "Share of respondents",
+    labels = percent,
+    expand = expansion(mult = c(0, .01))
+  ) +
+  scale_y_discrete(name = NULL) +
+  theme_style() +
+  theme(
+    legend.position = "top",
+    legend.justification = "left",
+    legend.key.size = unit(8, "pt"),
+    strip.text = element_text(hjust = 0, face = "bold"),
+    axis.line.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.spacing.x = unit(28, "pt"),
+    plot.margin = margin(5.5, 12, 5.5, 5.5)
+  )
+
+item_response_plot
+ 
+save_figure(item_response_plot, "Item Response Distributions by Group", height = 5)
+```
+
+# Primary IRT Model: No Anchors
+
+```{r primary-irt-model, cache = T}
+## Fit multiple-group IRT model with mirt
+model_inv <- multipleGroup(
+  data = df[, phq_items], # PHQ items only
+  model = 1, # One-factor model
+  group = df$sample_fct, # Grouped by sample
+  itemtype = "graded", # i.e., polytomous
+  invariance = c(
+    phq_items, # Hold invariant parameters (slopes, intercepts) for all items
+    "free_means", # Allow non-reference group (i.e., HMS) mean to vary
+    "free_var" # Allow non-reference group (i.e., HMS) variance to vary
+  ),
   verbose = F
 )
 
-# coef(fully_constrained_model)
-
-# Pull theta
-df$theta_fcm <- pull_scaled_theta(fully_constrained_model)
-
-# Correlations between thetas, phq_sum
-df %>%
-  select(phq_sum, theta_lordif, theta_fcm) %>%
-  cor() %>%
-  kable() %>%
-  kable_styling()
-
-# Are thetas on the same scale across groups?
-df %>%
-  ggplot(aes(phq_sum, theta_fcm, group = sample_char, color = sample_char)) +
-  geom_point(alpha = .1) +
-  geom_smooth() +
-  theme_classic() # I'd say so!
-```
-
-### Table 1. Results of Differential Item Functioning Tests.
-
-```{r}
-dif %>%
-  summary() %>%
-  pluck("stats") %>%
-  select(item, chi12, chi23, beta12, pseudo12.Nagelkerke, pseudo23.Nagelkerke) %>%
-  mutate(
-    across(c(chi12, chi23), ~ round(., 3)),
-    beta12 = percent(beta12, .1),
-    across(c(pseudo12.Nagelkerke, pseudo23.Nagelkerke), ~ round(., 3))
-  ) %>%
-  kable() %>%
-  kable_styling()
-```
-
-### Item 1: Anhedonia
-
-```{r}
-# Calculate models
-phq_1_model_1 <- lrm(data = df, formula = phq_1 ~ theta_fcm)
-phq_1_model_2 <- lrm(data = df, formula = phq_1 ~ theta_fcm + sample_hms)
-phq_1_model_3 <- lrm(data = df, formula = phq_1 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_1_model_1, phq_1_model_2, phq_1_model_3), "theta_fcm") %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_1_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 1: Anhedonia"
-  )
-
-plot_response_curves(phq_1_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 1: Anhedonia"
-  )
-
-# Estimate magnitude
-average_difference(phq_1_model_3)
-release_and_test("phq_1")
-```
-
-### Item 2: Depressed Mood
-
-```{r}
-# Calculate models
-phq_2_model_1 <- lrm(data = df, formula = phq_2 ~ theta_fcm)
-phq_2_model_2 <- lrm(data = df, formula = phq_2 ~ theta_fcm + sample_hms)
-phq_2_model_3 <- lrm(data = df, formula = phq_2 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_2_model_1, phq_2_model_2, phq_2_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_2_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 2: Depressed Mood"
-  )
-
-plot_response_curves(phq_2_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 2: Depressed Mood"
-  )
-
-# Estimate magnitude
-average_difference(phq_2_model_3)
-release_and_test("phq_2")
-```
-
-### Item 3: Trouble Sleeping
-
-```{r}
-# Calculate models
-phq_3_model_1 <- lrm(data = df, formula = phq_3 ~ theta_fcm)
-phq_3_model_2 <- lrm(data = df, formula = phq_3 ~ theta_fcm + sample_hms)
-phq_3_model_3 <- lrm(data = df, formula = phq_3 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_3_model_1, phq_3_model_2, phq_3_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_3_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 3: Trouble Sleeping"
-  )
-
-plot_response_curves(phq_3_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 3: Trouble Sleeping"
-  )
-
-# Estimate magnitude
-average_difference(phq_3_model_3)
-release_and_test("phq_3")
-```
-
-### Item 4: Feeling Tired
-
-```{r}
-# Calculate models
-phq_4_model_1 <- lrm(data = df, formula = phq_4 ~ theta_fcm)
-phq_4_model_2 <- lrm(data = df, formula = phq_4 ~ theta_fcm + sample_hms)
-phq_4_model_3 <- lrm(data = df, formula = phq_4 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_4_model_1, phq_4_model_2, phq_4_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_4_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 4: Feeling Tired"
-  )
-
-plot_response_curves(phq_4_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 4: Feeling Tired"
-  )
-
-# Estimate magnitude
-average_difference(phq_4_model_3)
-release_and_test("phq_4")
-```
-
-### Item 5: Poor Appetite or Overeating
-
-```{r}
-# Calculate models
-phq_5_model_1 <- lrm(data = df, formula = phq_5 ~ theta_fcm)
-phq_5_model_2 <- lrm(data = df, formula = phq_5 ~ theta_fcm + sample_hms)
-phq_5_model_3 <- lrm(data = df, formula = phq_5 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_5_model_1, phq_5_model_2, phq_5_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_5_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 5: Poor Appetite or Overeating"
-  )
-
-plot_response_curves(phq_5_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 5: Poor Appetite or Overeating"
-  )
-
-# Estimate magnitude
-average_difference(phq_5_model_3)
-release_and_test("phq_5")
-```
-
-### Item 6: Feeling Bad About Yourself
-
-```{r}
-# Calculate models
-phq_6_model_1 <- lrm(data = df, formula = phq_6 ~ theta_fcm)
-phq_6_model_2 <- lrm(data = df, formula = phq_6 ~ theta_fcm + sample_hms)
-phq_6_model_3 <- lrm(data = df, formula = phq_6 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_6_model_1, phq_6_model_2, phq_6_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_6_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 6: Feeling Bad About Yourself"
-  )
-
-plot_response_curves(phq_6_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 6: Feeling Bad About Yourself"
-  )
-
-# Estimate magnitude
-average_difference(phq_6_model_3)
-release_and_test("phq_6")
-```
-
-### Item 7: Difficulty Concentrating
-
-```{r}
-# Calculate models
-phq_7_model_1 <- lrm(data = df, formula = phq_7 ~ theta_fcm)
-phq_7_model_2 <- lrm(data = df, formula = phq_7 ~ theta_fcm + sample_hms)
-phq_7_model_3 <- lrm(data = df, formula = phq_7 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_7_model_1, phq_7_model_2, phq_7_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_7_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 7: Difficulty Concentrating"
-  )
-
-plot_response_curves(phq_7_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 7: Difficulty Concentrating"
-  )
-
-# Estimate magnitude
-average_difference(phq_7_model_3)
-release_and_test("phq_7")
-```
-
-### Item 8: Psychomotor Symptoms
-
-```{r}
-# Calculate models
-phq_8_model_1 <- lrm(data = df, formula = phq_8 ~ theta_fcm)
-phq_8_model_2 <- lrm(data = df, formula = phq_8 ~ theta_fcm + sample_hms)
-phq_8_model_3 <- lrm(data = df, formula = phq_8 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_8_model_1, phq_8_model_2, phq_8_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_8_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 8: Psychomotor Symptoms"
-  )
-
-plot_response_curves(phq_8_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 8: Psychomotor Symptoms"
-  )
-
-# Estimate magnitude
-average_difference(phq_8_model_3)
-release_and_test("phq_8")
-```
-
-### Item 9: Suicidal Ideation
-
-```{r}
-# Calculate models
-phq_9_model_1 <- lrm(data = df, formula = phq_9 ~ theta_fcm)
-phq_9_model_2 <- lrm(data = df, formula = phq_9 ~ theta_fcm + sample_hms)
-phq_9_model_3 <- lrm(data = df, formula = phq_9 ~ theta_fcm * sample_hms)
-
-# Print models
-tidy_lrm_list(list(phq_9_model_1, phq_9_model_2, phq_9_model_3)) %>%
-  kable() %>%
-  kable_styling()
-
-# Print plots
-plot_mean_response(phq_9_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 9: Suicidal Ideation"
-  )
-
-plot_response_curves(phq_9_model_3) +
-  ggtitle(
-    "Predicted Item Response by Theta and Group",
-    "PHQ-9 Item 9: Suicidal Ideation"
-  )
-
-# Estimate magnitude
-average_difference(phq_9_model_3)
-release_and_test("phq_9")
-```
-
-### Table 2. Results of Logistic Regressions Predicting Item Response.
-
-```{r}
-tidy_lrm_list(
-  list(
-    phq_1_model_2,
-    phq_2_model_2,
-    phq_3_model_2,
-    phq_4_model_2,
-    phq_5_model_2,
-    phq_6_model_2,
-    phq_7_model_2,
-    phq_8_model_2,
-    phq_9_model_2
-  )
-) %>%
-  drop_na() %>%
-  kable() %>%
-  kable_styling()
-```
-
-### Figure 1. Item Score Functions by Group.
-
-```{r}
-min_theta <- min(df$theta_fcm)
-max_theta <- max(df$theta_fcm)
-
-out <- expand_grid(
-  theta_fcm = seq(min_theta, max_theta, .01),
-  sample_hms = c(0, 1)
+coef(model_inv, simplify = T)
+
+
+## Test DIF with mirt
+# A test of uniform DIF (free intercepts)
+uniform_test_inv <- DIF(
+  MGmodel = model_inv, # Use multi-group model above
+  which.par = c("d1", "d2", "d3"), # Free intercepts relative to a fully constrained model in order to test uniform DIF
+  scheme = "drop", # Specify that parameters in which.par will be freely estimated
+  p.adjust = "none"
 )
 
-predictions <- list(
-  phq_1_model_3,
-  phq_2_model_3,
-  phq_3_model_3,
-  phq_4_model_3,
-  phq_5_model_3,
-  phq_6_model_3,
-  phq_7_model_3,
-  phq_8_model_3,
-  phq_9_model_3
+uniform_test_inv
+
+# A test of omnibus DIF (free intercepts and slopes)
+omnibus_test_inv <- DIF(
+  MGmodel = model_inv, # Use multi-group model above
+  which.par = c("a1", "d1", "d2", "d3"), # Free intercepts and slopes relative to a fully constrained model to test omnibus DIF
+  scheme = "drop", # Specify that parameters in which.par will be freely estimated 
+  p.adjust = "none"
+)
+
+omnibus_test_inv
+
+# A test of non-uniform DIF (omnibus - uniform)
+nonuniform_test_inv <- left_join(
+  omnibus_test_inv %>% rownames_to_column("item") %>% select(item, X2_omnibus = X2),
+  uniform_test_inv %>% rownames_to_column("item") %>% select(item, X2_uniform = X2),
+  by = "item"
 ) %>%
-  map(
-    .,
-    ~ predict(
-      object = .,
-      newdata = out,
-      type = "mean"
-    )
-  ) %>%
-  bind_cols() %>%
-  rename(
-    `Item 1: Anhedonia` = ...1,
-    `Item 2: Depressed Mood` = ...2,
-    `Item 3: Trouble Sleeping` = ...3,
-    `Item 4: Feeling Tired` = ...4,
-    `Item 5: Poor Appetite or Overeating` = ...5,
-    `Item 6: Feeling Bad About Yourself` = ...6,
-    `Item 7: Difficulty Concentrating` = ...7,
-    `Item 8: Psychomotor Symptoms` = ...8,
-    `Item 9: Suicidal Ideation` = ...9
+  mutate(
+    X2_difference = X2_omnibus - X2_uniform,
+    p = pchisq(X2_difference, df = 1, lower.tail = F)
   )
 
-figure_1 <- out %>%
-  bind_cols(predictions) %>%
-  pivot_longer(
-    cols = starts_with("Item"),
-    names_to = "item",
-    values_to = "pred"
-  ) %>%
-  mutate(
-    sample_hms = case_match(
-      sample_hms, 
-      0 ~ "NHANES", 
-      1 ~ "HMS" 
+nonuniform_test_inv
+
+
+## Release each item one at a time (to estimate effect sizes of each item's DIF, below)
+released_models <- map(
+  .x = 1:9,
+  .f = ~ {
+    
+    # Fit a model with that item's parameters free
+    model_free_.x <- multipleGroup(
+      df[, phq_items],
+      model = 1,
+      group = df$sample_fct,
+      itemtype = "graded",
+      invariance = c(
+        phq_items[-.x], # Free parameters of variable .x
+        "free_means",
+        "free_var"
+      ),
+      verbose = F
     )
-  ) %>%
-  ggplot() +
-  geom_line(
-    aes(theta_fcm, pred, group = sample_hms, color = sample_hms),
-    linewidth = 1
+    
+    return(model_free_.x)
+    
+  }
+)
+
+
+## Use released models to estimate effect sizes of each item's DIF
+effect_sizes_inv <- map2(
+  .x = released_models,
+  .y = 1:9,
+  .f = ~ empirical_ES(mod = .x, focal_items = .y) %>%
+    rownames_to_column("item")
+) %>%
+  bind_rows()
+
+effect_sizes_inv
+# SIDS: Signed item difference in the sample (i.e., across HMS respondents); 
+#       the average expected (model-implied) difference between HMS and NHANES 
+#       item responses at a given theta, across the theta distribution of HMS
+# UIDS: Unsigned item difference in the sample; above, but average absolute value
+#       at every theta
+# ESSD: Expected score standardized difference; SIDS but adjusted for SD of 
+#       expected scores (as low-frequency, low-SD items otherwise produce lower 
+#       differences)
+
+
+## Build tibble of expected values (and probabilities of each response level) given group, item, theta
+item_group_combinations <- expand_grid(
+  item = 1:9,
+  group = groups
+)
+
+expected_values_inv <- map2(
+  .x = item_group_combinations$item,
+  .y = item_group_combinations$group,
+  .f = ~ {
+    
+    model_.x <- released_models[[.x]]
+    
+    item_.x_.y <- extract.item(model_.x, .x, .y)
+
+    expected_values_.x_.y <- tibble(theta = seq(-5, 5, .01)) %>%
+      mutate(
+        item = .x,
+        group = .y,
+        ev = expected.item(item_.x_.y, theta),
+        p1 = probtrace(item_.x_.y, theta)[, "P.1"],
+        p2 = probtrace(item_.x_.y, theta)[, "P.2"],
+        p3 = probtrace(item_.x_.y, theta)[, "P.3"],
+        p4 = probtrace(item_.x_.y, theta)[, "P.4"]
+      )
+    
+    return(expected_values_.x_.y)
+    
+  }
+) %>%
+  bind_rows()
+```
+
+## Figures for Primary IRT Model
+
+```{r irt-figures}
+## Prepare curve data for plotting
+theta_limits <- c(-3, 5) # Covers nearly all of both groups (HMS mean ~1, SD ~0.9)
+
+curves <- expected_values_inv %>%
+  filter(between(theta, theta_limits[1], theta_limits[2])) %>%
+  mutate(
+    item = factor(item_labels[phq_items[item]], levels = item_labels),
+    group = factor(group, levels = c("NHANES", "HMS"))
+  )
+ 
+ 
+## Item score functions: expected item score by theta and group
+# Signed difference (SIDS) printed in each panel
+sids_labels <- effect_sizes_inv %>%
+  transmute(
+    item = factor(item_labels[item], levels = item_labels),
+    label = "SIDS = " %+% sprintf("%+.2f", SIDS)
+  )
+
+item_score_plot <- curves %>%
+  ggplot(aes(theta, ev, color = group)) +
+  geom_line(linewidth = .6) +
+  geom_text(
+    data = sids_labels,
+    aes(x = theta_limits[1], y = 3, label = label),
+    inherit.aes = FALSE,
+    hjust = 0, vjust = 1, size = 7.5 / .pt, color = "grey35"
   ) +
+  facet_wrap(~ item, ncol = 3) +
+  scale_color_manual(values = sample_colors) +
   scale_x_continuous(
-    name = expression(paste("Estimated Depression (", theta, ")"))
+    name = expression("Depression (" * theta * ", NHANES SD units)"),
+    limits = theta_limits,
+    breaks = -3:4
   ) +
   scale_y_continuous(
-    name = NULL,
+    name = "Expected item score",
     limits = c(0, 3),
-    breaks = 0:3,
-    labels = c("Not at all", "Several days", "More than half the days", "Nearly every day")
+    breaks = 0:3
   ) +
-  scale_color_discrete(
-    name = "Sample"
-  ) +
-  facet_wrap(
-    ~ item,
-    ncol = 3,
-    nrow = 3
-  ) +
-  theme_classic()
+  theme_style()
 
-figure_1
+item_score_plot
 
-ggsave(
-  filename = here("Figure 1.png"),
-  plot = figure_1,
-  width = 10,
-  height = 8,
-  units = "in"
-)
-```
+save_figure(item_score_plot, "Item Score Functions by Group", height = 6)
 
-### Scale Score
 
-```{r}
-# Linear model predicting sum score
-sum_score_model <- lm(data = df, formula = phq_sum ~ poly(theta_fcm, 4) * sample_hms)
-sum_score_model %>%
-  tidy() %>%
-  kable(digits = 2) %>%
-  kable_styling()
-
-# Estimate impact
-average_difference(sum_score_model)
-```
-
-### Figure 2. Scale Score Functions by Group.
-
-```{r}
-# Plot using smoother
-figure_2 <- df %>%
-  ggplot() +
-  geom_smooth(
-    aes(theta_fcm, phq_sum, group = sample_char, color = sample_char),
-    method = "lm",
-    formula = y ~ poly(x, 4),
-    se = F
-  ) +
-  scale_x_continuous(name = expression(paste("Estimated Depression (", theta, ")"))) +
-  scale_y_continuous(name = "PHQ-9 Sum Score") +
-  scale_color_discrete(name = "Sample") +
-  theme_classic()
-
-figure_2
-
-ggsave(
-  filename = here("Figure 2.png"),
-  plot = figure_2,
-  width = 6,
-  height = 5,
-  units = "in"
-)
-
-# Logistic models predicting categorical cutoff don't seem to fit well, as quadratic
-# terms resulted in predicted values of 1 or 0 (probably because of high R2)... 
-# but based on the geom_smooth() above I think it's safe to say this isn't a problem
-```
-
-### Figure S1. Item Response Functions by Group.
-
-```{r}
-min_theta <- min(df$theta_fcm)
-max_theta <- max(df$theta_fcm)
-
-out <- expand_grid(
-  theta_fcm = seq(min_theta, max_theta, .01),
-  sample_hms = c(0, 1)
-)
-
-predictions <- list(
-  phq_1_model_3,
-  phq_2_model_3,
-  phq_3_model_3,
-  phq_4_model_3,
-  phq_5_model_3,
-  phq_6_model_3,
-  phq_7_model_3,
-  phq_8_model_3,
-  phq_9_model_3
-) %>%
-  map(
-    .,
-    ~ predict(
-      object = .,
-      newdata = out,
-      type = "fitted.ind"
-    )
-  ) %>%
-  bind_cols()
-
-figure_S1 <- out %>%
-  bind_cols(predictions) %>%
+## Category response curves: probability of each response option by theta and group
+category_curves <- curves %>%
+  select(theta, item, group, p1:p4) %>%
   pivot_longer(
-    cols = starts_with("phq"),
-    names_to = "item_response",
+    cols = p1:p4,
+    names_to = "response",
     values_to = "prob"
   ) %>%
+  mutate(response = factor(response, levels = c("p1", "p2", "p3", "p4"), labels = 0:3))
+ 
+# Label each category (0-3) above its highest curve, first panel only
+category_labels <- category_curves %>%
+  filter(item == item_labels[1]) %>%
+  group_by(response) %>%
+  slice_max(prob, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
   mutate(
-    item = str_extract(item_response, ".*(?=\\=)"),
-    response = str_extract(item_response, "(?<=\\=).*") %>%
-      case_match(
-        "0" ~ "Not at all",
-        "1" ~ "Several days",
-        "2" ~ "More than half the days",
-        "3" ~ "Nearly every day"
-      ),
-    sample_hms = case_match(
-      sample_hms, 
-      0 ~ "NHANES", 
-      1 ~ "HMS" 
+    theta = case_when(
+      response == "0" ~ theta_limits[1] + .3, # Category 0 peaks at the left edge
+      response == "3" ~ theta_limits[2] - .3, # Category 3 peaks at the right edge
+      TRUE ~ theta
+    ),
+    prob = case_when(
+      response %in% c("0", "3") ~ .92,
+      TRUE ~ prob + .07
     )
-  ) %>%
-  # Calculate highpoint for dotted line
-  group_by(sample_hms, item, response) %>%
-  mutate(highpoint = theta_fcm[prob == max(prob)]) %>%
-  ggplot() +
-  geom_line(
-    aes(theta_fcm, prob, group = response, color = response),
-    linewidth = .5
+  )
+ 
+category_curve_plot <- category_curves %>%
+  ggplot(aes(theta, prob, color = group, group = interaction(group, response))) +
+  geom_line(linewidth = .5) +
+  geom_text(
+    data = category_labels,
+    aes(label = response),
+    color = "grey35", size = 7.5 / .pt,
+    show.legend = F
   ) +
-  geom_vline(
-    aes(xintercept = highpoint, group = response, color = response),
-    linewidth = .5,
-    linetype = "dashed"
-  ) +
+  facet_wrap(~ item, ncol = 3) +
+  scale_color_manual(values = sample_colors) +
   scale_x_continuous(
-    name = expression(paste("Estimated Depression (", theta, ")"))
+    name = expression("Depression (" * theta * ", NHANES SD units)"),
+    limits = theta_limits,
+    breaks = -3:4
   ) +
   scale_y_continuous(
-    name = "P(Response)",
-    limits = c(0, 1)
+    name = "Probability of response",
+    limits = c(0, 1),
+    breaks = seq(0, 1, .25),
+    labels = percent
   ) +
-  scale_color_discrete(
-    name = "Response"
-  ) +
-  facet_grid(
-    rows = vars(sample_hms),
-    cols = vars(item)
-  ) +
-  theme_classic()
+  theme_style()
+ 
+category_curve_plot
 
-figure_S1
-
-ggsave(
-  filename = here("Figure S1.png"),
-  plot = figure_S1,
-  width = 14,
-  height = 5,
-  units = "in"
-)
+save_figure(category_curve_plot, "Category Response Curves by Group", height = 6)
 ```
 
-### Testing Prevalence
+# Alternative IRT Model 1: Empirical Anchors (Items 4, 5)
 
-```{r}
-library(survey)
-
-df <- df %>%
-  mutate(
-    core_symptoms_sum = phq_1 + phq_2,
-    across(
-      all_of("phq_" %+% 1:9),
-      ~ . >= 2,
-      .names = "{.col}_bin"
-    ),
-    elevated_symptoms_total = phq_1_bin + phq_2_bin + phq_3_bin + phq_4_bin + phq_5_bin + phq_6_bin + phq_7_bin + phq_8_bin + phq_9_bin,
-    elevated_core_symptoms = phq_1_bin + phq_2_bin,
-    diagnostic_algorithm = elevated_symptoms_total >= 5 & elevated_core_symptoms >= 1
-  )
-
-df_weights <- df %>%
-  drop_na(weight)
-
-design <- svydesign(
-  data = df_weights,
-  ids = ~ 0,
-  strata = ~ sample_char,
-  weights = ~ weight
+```{r empirical-anchor-model, cache = T}
+## Fit model with empirical anchors
+model_emp <- multipleGroup(
+  data = df[, phq_items], # PHQ items only
+  model = 1, # One-factor model
+  group = df$sample_fct, # Grouped by sample
+  itemtype = "graded", # i.e., polytomous
+  invariance = c(
+    c("phq_4", "phq_5"), # Hold invariant parameters (slopes, intercepts) for anchor items
+    "free_means", # Allow non-reference group (i.e., HMS) mean to vary
+    "free_var" # Allow non-reference group (i.e., HMS) variance to vary
+  ),
+  verbose = F
 )
 
-svyby(~ phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties vs diagnostic interviews (1)
-svyby(~ core_symptoms_sum >= 3, ~ sample_char, design, svyciprop, vartype = "ci") # Good properties (2)
-svyby(~ core_symptoms_sum >= 3 & phq_sum >= 10, ~ sample_char, design, svyciprop, vartype = "ci") # Even better properties (2) 
-svyby(~ diagnostic_algorithm, ~ sample_char, design, svyciprop, vartype = "ci") # Not recommended (1) (3)
+coef(model_emp, simplify = T)
+
+
+## Test DIF with mirt
+# A test of non-uniform DIF
+nonuniform_test_emp <- DIF(
+  MGmodel = model_emp, # Use multi-group model above
+  which.par = "a1", # Constrain slopes relative to a fully free model to test non-uniform DIF
+  scheme = "add", # Specify that parameters in which.par will be constrained
+  p.adjust = "none"
+)
+
+nonuniform_test_emp
+
+# A test of omnibus DIF
+omnibus_test_emp <- DIF(
+  MGmodel = model_emp, # Use multi-group model above
+  which.par = c("a1", "d1", "d2", "d3"), # Constrain intercepts and slopes relative to a fully free model to test omnibus DIF
+  scheme = "add", # Specify that parameters in which.par will be constrained
+  p.adjust = "none"
+)
+
+omnibus_test_emp
+
+# A test of uniform DIF (omnibus - non-uniform)
+uniform_test_emp <- left_join(
+  omnibus_test_emp %>% rownames_to_column("item") %>% select(item, X2_omnibus = X2),
+  nonuniform_test_emp %>% rownames_to_column("item") %>% select(item, X2_nonuniform = X2),
+  by = "item"
+) %>%
+  mutate(
+    X2_difference = X2_omnibus - X2_nonuniform,
+    p = pchisq(X2_difference, df = 3, lower.tail = F)
+  )
+
+uniform_test_emp
+
+
+## Estimate effect sizes of each (non-anchor) item's DIF
+effect_sizes_emp <- empirical_ES(model_emp, focal_items = 1:9) %>%
+  rownames_to_column("item")
+
+effect_sizes_emp
+
+
+## Build tibble of expected values given group, item, theta
+expected_values_emp <- map2(
+  .x = item_group_combinations$item,
+  .y = item_group_combinations$group,
+  .f = ~ {
+    
+    item_.x_.y <- extract.item(model_emp, .x, .y)
+
+    expected_values_.x_.y <- tibble(theta = seq(-5, 5, .01)) %>%
+      mutate(
+        item = .x,
+        group = .y,
+        ev = expected.item(item_.x_.y, theta)
+      )
+    
+    return(expected_values_.x_.y)
+    
+  }
+) %>%
+  bind_rows()
+```
+
+## Figures for Alternative IRT Model 1
+
+```{r irt-figures-alt-1}
+## Prepare curve data for plotting
+curves <- expected_values_emp %>%
+  filter(between(theta, theta_limits[1], theta_limits[2])) %>%
+  mutate(
+    item = factor(item_labels[phq_items[item]], levels = item_labels),
+    group = factor(group, levels = c("NHANES", "HMS"))
+  )
+ 
+ 
+## Item score functions: expected item score by theta and group
+# Signed difference (SIDS) printed in each panel
+sids_labels <- effect_sizes_emp %>%
+  transmute(
+    item = factor(item_labels[item], levels = item_labels),
+    label = "SIDS = " %+% sprintf("%+.2f", SIDS)
+  )
+
+item_score_plot <- curves %>%
+  ggplot(aes(theta, ev, color = group)) +
+  geom_line(linewidth = .6) +
+  geom_text(
+    data = sids_labels,
+    aes(x = theta_limits[1], y = 3, label = label),
+    inherit.aes = FALSE,
+    hjust = 0, vjust = 1, size = 7.5 / .pt, color = "grey35"
+  ) +
+  facet_wrap(~ item, ncol = 3) +
+  scale_color_manual(values = sample_colors) +
+  scale_x_continuous(
+    name = expression("Depression (" * theta * ", NHANES SD units)"),
+    limits = theta_limits,
+    breaks = -3:4
+  ) +
+  scale_y_continuous(
+    name = "Expected item score",
+    limits = c(0, 3),
+    breaks = 0:3
+  ) +
+  theme_style()
+
+item_score_plot
+
+save_figure(item_score_plot, "Item Score Functions by Group (Empirical Anchors)", height = 6)
+```
+
+# Alternative IRT Model 2: Theory-Driven Anchors (Items 1, 2)
+
+```{r theory-driven-anchor-model, cache = T}
+## Fit model with theory-driven anchors
+model_the <- multipleGroup(
+  data = df[, phq_items], # PHQ items only
+  model = 1, # One-factor model
+  group = df$sample_fct, # Grouped by sample
+  itemtype = "graded", # i.e., polytomous
+  invariance = c(
+    c("phq_1", "phq_2"), # Hold invariant parameters (slopes, intercepts) for anchor items
+    "free_means", # Allow non-reference group (i.e., HMS) mean to vary
+    "free_var" # Allow non-reference group (i.e., HMS) variance to vary
+  ),
+  verbose = F
+)
+
+coef(model_the, simplify = T)
+
+
+## Test DIF with mirt
+# A test of non-uniform DIF
+nonuniform_test_the <- DIF(
+  MGmodel = model_the, # Use multi-group model above
+  which.par = "a1", # Constrain slopes relative to a fully free model to test non-uniform DIF
+  scheme = "add", # Specify that parameters in which.par will be constrained
+  p.adjust = "none"
+)
+
+nonuniform_test_the
+
+# A test of omnibus DIF
+omnibus_test_the <- DIF(
+  MGmodel = model_the, # Use multi-group model above
+  which.par = c("a1", "d1", "d2", "d3"), # Constrain intercepts and slopes relative to a fully free model to test omnibus DIF
+  scheme = "add", # Specify that parameters in which.par will be constrained
+  p.adjust = "none"
+)
+
+omnibus_test_the
+
+# A test of uniform DIF (omnibus - non-uniform)
+uniform_test_the <- left_join(
+  omnibus_test_the %>% rownames_to_column("item") %>% select(item, X2_omnibus = X2),
+  nonuniform_test_the %>% rownames_to_column("item") %>% select(item, X2_nonuniform = X2),
+  by = "item"
+) %>%
+  mutate(
+    X2_difference = X2_omnibus - X2_nonuniform,
+    p = pchisq(X2_difference, df = 3, lower.tail = F)
+  )
+
+uniform_test_the
+
+
+## Estimate effect sizes of each (non-anchor) item's DIF
+effect_sizes_the <- empirical_ES(model_the, focal_items = 1:9) %>%
+  rownames_to_column("item")
+
+effect_sizes_the
+
+
+## Build tibble of expected values given group, item, theta
+expected_values_the <- map2(
+  .x = item_group_combinations$item,
+  .y = item_group_combinations$group,
+  .f = ~ {
+    
+    item_.x_.y <- extract.item(model_the, .x, .y)
+
+    expected_values_.x_.y <- tibble(theta = seq(-5, 5, .01)) %>%
+      mutate(
+        item = .x,
+        group = .y,
+        ev = expected.item(item_.x_.y, theta)
+      )
+    
+    return(expected_values_.x_.y)
+    
+  }
+) %>%
+  bind_rows()
+```
+
+## Figures for Alternative IRT Model 2
+
+```{r irt-figures-alt-2}
+## Prepare curve data for plotting
+curves <- expected_values_the %>%
+  filter(between(theta, theta_limits[1], theta_limits[2])) %>%
+  mutate(
+    item = factor(item_labels[phq_items[item]], levels = item_labels),
+    group = factor(group, levels = c("NHANES", "HMS"))
+  )
+ 
+ 
+## Item score functions: expected item score by theta and group
+# Signed difference (SIDS) printed in each panel
+sids_labels <- effect_sizes_the %>%
+  transmute(
+    item = factor(item_labels[item], levels = item_labels),
+    label = "SIDS = " %+% sprintf("%+.2f", SIDS)
+  )
+
+item_score_plot <- curves %>%
+  ggplot(aes(theta, ev, color = group)) +
+  geom_line(linewidth = .6) +
+  geom_text(
+    data = sids_labels,
+    aes(x = theta_limits[1], y = 3, label = label),
+    inherit.aes = FALSE,
+    hjust = 0, vjust = 1, size = 7.5 / .pt, color = "grey35"
+  ) +
+  facet_wrap(~ item, ncol = 3) +
+  scale_color_manual(values = sample_colors) +
+  scale_x_continuous(
+    name = expression("Depression (" * theta * ", NHANES SD units)"),
+    limits = theta_limits,
+    breaks = -3:4
+  ) +
+  scale_y_continuous(
+    name = "Expected item score",
+    limits = c(0, 3),
+    breaks = 0:3
+  ) +
+  theme_style()
+
+item_score_plot
+
+save_figure(item_score_plot, "Item Score Functions by Group (Empirical Anchors)", height = 6)
+```
+
+# Magnitude and Impact
+
+```{r dif-magnitude-impact}
+## Latent means and SDs under each scheme (HMS only; NHANES is reference group so distributed 0, 1)
+latent_means <- list(
+  "Main (all others)" = model_inv,
+  "Anchors 4, 5" = model_emp,
+  "Anchors 1, 2" = model_the
+) %>%
+  imap(~ {
+    hms <- coef(.x, simplify = T)$HMS
+    tibble(
+      model = .y,
+      mean = hms$means[1],
+      sd = sqrt(hms$cov[1, 1]) # cov is the latent variance
+    )
+  }) %>%
+  bind_rows()
+
+latent_means
+
+
+## Plot test characteristic curves (TCCs)
+tcc <- list(
+  "Main (all others)" = expected_values_inv,
+  "Anchors 4, 5"      = expected_values_emp,
+  "Anchors 1, 2"      = expected_values_the
+) %>%
+  imap(~ .x %>%
+    filter(between(theta, -3, 4)) %>%
+    group_by(theta, group) %>%
+    summarise(total = sum(ev), .groups = "drop") %>%
+    mutate(scheme = .y)
+  ) %>%
+  bind_rows() %>%
+  mutate(
+    scheme = factor(scheme, levels = c("Main (all others)", "Anchors 4, 5", "Anchors 1, 2")),
+    group = factor(group, levels = c("NHANES", "HMS"))
+  )
+
+tcc_plot <- tcc %>%
+  ggplot(aes(theta, total, color = group)) +
+  geom_hline(yintercept = 10, color = "grey70", linewidth = .3, linetype = "dashed") +
+  geom_line(linewidth = .6) +
+  facet_wrap(~ scheme, nrow = 1) +
+  scale_color_manual(values = sample_colors) +
+  scale_x_continuous(
+    name = expression("Depression (" * theta * ", NHANES SD units)"),
+    limits = c(-3, 4),
+    breaks = -3:4
+  ) +
+  scale_y_continuous(
+    name = "Expected PHQ-9 total score",
+    limits = c(0, 27),
+    breaks = seq(0, 27, 3)
+  ) +
+  theme_style() +
+  theme(panel.spacing.x = unit(14, "pt"))
+
+tcc_plot
+
+save_figure(tcc_plot, "Figure - Test Characteristic Curves by Group", height = 3.2)
+
+
+## Scale-wide impact by scheme
+impact <- list(
+  "No Anchors (Iterative)" = list(ev = expected_values_inv, mod = model_inv),
+  "Empirical Anchors (4, 5)" = list(ev = expected_values_emp, mod = model_emp),
+  "Theory-Driven Anchors (1, 2)" = list(ev = expected_values_the, mod = model_the)
+) %>%
+  imap(~ {
+    
+    # EAP theta for each HMS respondent
+    theta_hat_hms <- fscores(extract.group(.x$mod, "HMS"), method = "EAP")[, 1]
+
+    # TCC gap (HMS minus NHANES) on the theta grid
+    tcc_gap <- .x$ev %>%
+      group_by(theta, group) %>%
+      summarize(total = sum(ev), .groups = "drop") %>%
+      pivot_wider(names_from = group, values_from = total) %>%
+      mutate(
+        theta = round(theta, 2), # For join
+        gap = HMS - NHANES
+      )
+
+    # Join to actual HMS respondents' thetas, then summarize
+    impact_.y <- tibble(theta = round(theta_hat_hms, 2)) %>%
+      left_join(tcc_gap, by = "theta") %>%
+      summarize(
+        scheme = .y,
+        STDS = mean(gap),
+        UTDS = mean(abs(gap))
+      )
+    
+    return(impact_.y)
+    
+  }) %>%
+  bind_rows()
+
+impact
+
+
+## Individual-level DIF impact: naive vs DIF-adjusted theta (Crane et al.)
+# Naive scores assume no DIF (from invariant model)
+# Difference is salient if |difference| > median SE of naive scores
+theta_naive <- fscores(model_inv, method = "EAP", full.scores.SE = T)
+salient_threshold <- median(theta_naive[, "SE_F1"])
+
+individual_impact <- list(
+  "Anchors 4, 5" = model_emp,
+  "Anchors 1, 2" = model_the
+) %>%
+  imap(~ tibble(
+    scheme = .y,
+    sample = df$sample_fct,
+    theta_naive = theta_naive[, "F1"],
+    theta_adjusted = fscores(.x, method = "EAP")[, "F1"]
+  )) %>%
+  bind_rows() %>%
+  mutate(diff = theta_adjusted - theta_naive)
+
+individual_impact_summary <- individual_impact %>%
+  group_by(scheme, sample) %>%
+  summarize(
+    r = cor(theta_naive, theta_adjusted),
+    mean_diff = mean(diff),
+    sd_diff = sd(diff),
+    max_abs_diff = max(abs(diff)),
+    pct_salient = mean(abs(diff) > salient_threshold),
+    .groups = "drop"
+  )
+
+individual_impact_summary
+```
+
+# Depression Prevalence by Screening Methodology
+
+```{r depression-prevalence}
+options(survey.lonely.psu = "adjust")
+
+## Screening definitions (each a 0/1 indicator)
+df_screen <- df %>%
+  mutate(
+    phq_2_sum = phq_1 + phq_2,
+    n_criteria = rowSums(across(phq_1:phq_9, ~ . >= 2)),
+    screen_phq9 = as.numeric(phq_sum >= 10),
+    screen_phq2 = as.numeric(phq_2_sum >= 3),
+    screen_phq2_phq9 = as.numeric(phq_2_sum >= 3 & phq_sum >= 10),
+    screen_algorithm = as.numeric(n_criteria >= 5 & (phq_1 >= 2 | phq_2 >= 2))
+  )
+
+screen_labels <- c(
+  screen_phq9 = "PHQ-9 >= 10", # (1)
+  screen_phq2 = "PHQ-2 >= 3", # (2)
+  screen_phq2_phq9 = "PHQ-2 >= 3 and PHQ-9 >= 10", # (2)
+  screen_algorithm = "DSM-5 algorithm" # (1) (3)
+)
 
 # (1) https://karger.com/pps/article/89/1/25/289799/The-Accuracy-of-the-Patient-Health-Questionnaire-9
 # (2) https://jamanetwork.com/journals/jama/article-abstract/2766865
-# (3) https://www.sciencedirect.com/science/article/abs/pii/S0163834314002540?via%3Dihub
-```
+# (3) https://www.sciencedirect.com/science/article/abs/pii/S0163834314002540
 
-### Exploratory: What if we hold the core symptoms constant, but allow all others to vary?
 
-```{r}
-core_symptom_model <- multipleGroup(
-  data = df[, 1:9],
-  model = 1,
-  group = df$sample_char,
-  invariance = c("phq_1", "phq_2"),
-  verbose = F
+## Survey designs
+# NHANES: build on all cycles, then subset to 2021-2023
+nhanes_design <- svydesign(
+  data = df_screen %>% filter(sample_fct == "NHANES"),
+  ids = ~ psu, strata = ~ strata, weights = ~ weight, nest = TRUE
+) %>%
+  subset(most_recent_survey)
+
+# HMS: clustered by school, nonresponse weights
+hms_design <- svydesign(
+  data = df_screen %>% filter(sample_fct == "HMS"),
+  ids = ~ psu, weights = ~ weight
 )
 
-# coef(core_symptom_model)
 
-df$theta_csm <- pull_scaled_theta(core_symptom_model)
+## Weighted prevalence (logit CIs) by screening definition and sample
+designs <- list(NHANES = nhanes_design, HMS = hms_design)
 
-# Correlations between thetas across models
-df %>%
-  select(starts_with("theta")) %>%
-  cor() %>%
-  kable() %>%
-  kable_styling()
-
-# Differences in this model
-df %>%
-  mutate(theta_change = theta_csm - theta_fcm) %>%
-  group_by(sample_char) %>%
-  summarize(
-    mean_change = mean(theta_change),
-    significant_change = mean(theta_change > .3)
+prevalence <- expand_grid(
+  sample = names(designs),
+  screen = names(screen_labels)
+) %>%
+  mutate(
+    est = map2(sample, screen, ~ svyciprop(as.formula("~" %+% .y), designs[[.x]], method = "logit")),
+    prevalence = as.numeric(est),
+    lower = map_dbl(est, ~ confint(.x)[1]),
+    upper = map_dbl(est, ~ confint(.x)[2]),
+    sample = factor(sample, levels = names(designs)),
+    screen = factor(screen_labels[screen], levels = screen_labels)
   ) %>%
-  kable() %>%
-  kable_styling()
+  select(-est)
 
-# Logistic models
-"phq_" %+% 1:9 %>%
-  map(.,
-      ~ lrm(
-        data = df,
-        formula = as.formula(. %+% " ~ theta_csm + sample_hms")
-      )) %>%
-  tidy_lrm_list(theta = "theta_csm") %>%
-  drop_na() %>%
-  kable() %>%
-  kable_styling()
-```
 
-### Exploratory: What if we use PHQ-2 sum score as our "theta"?
+## Table: prevalence (95% CI) by sample, plus HMS / NHANES ratio
+prevalence_table <- prevalence %>%
+  mutate(estimate = 
+           percent(prevalence, .1) %+% 
+           " (" %+% 
+           percent(lower, .1) %+% 
+           ", " %+% 
+           percent(upper, .1) %+% 
+           ")"
+         ) %>%
+  select(screen, sample, estimate, prevalence) %>%
+  pivot_wider(names_from = sample, values_from = c(estimate, prevalence)) %>%
+  mutate(ratio = round(prevalence_HMS / prevalence_NHANES, 1)) %>%
+  select(screen, NHANES = estimate_NHANES, HMS = estimate_HMS, ratio) %>%
+  arrange(screen)
 
-```{r}
-df$core_symptom_sum <- df$phq_1 + df$phq_2
-
-# Correlations between sum scores and thetas
-df %>%
-  select(core_symptom_sum, phq_sum, starts_with("theta")) %>%
-  cor() %>%
-  kable() %>%
-  kable_styling()
-
-# Logistic models
-"phq_" %+% 1:9 %>%
-  map(.,
-      ~ lrm(
-        data = df,
-        formula = as.formula(. %+% " ~ core_symptom_sum + sample_hms")
-      )) %>%
-  tidy_lrm_list(theta = "core_symptom_sum") %>%
-  drop_na() %>%
-  kable() %>%
-  kable_styling()
+prevalence_table
 ```
