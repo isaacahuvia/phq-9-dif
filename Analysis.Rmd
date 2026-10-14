@@ -53,7 +53,6 @@ item_labels <- c(
   phq_9 = "9. Suicidal ideation"
 )
 
-# Item labels for tables (no period after the number, which pandoc would turn into a list)
 item_labels_table <- set_names(str_remove(item_labels, "\\."), names(item_labels))
  
 response_labels <- c(
@@ -62,6 +61,8 @@ response_labels <- c(
   "2" = "More than half the days",
   "3" = "Nearly every day"
 )
+
+theta_limits <- c(-3, 5) # For plots; covers nearly all of both groups (HMS mean ~1, SD ~0.9)
 
 
 ## Set visual style
@@ -459,9 +460,7 @@ expected_values_inv <- map2(
 
 ```{r irt-figures}
 ## Prepare curve data for plotting
-theta_limits <- c(-3, 5) # Covers nearly all of both groups (HMS mean ~1, SD ~0.9)
-
-curves <- expected_values_inv %>%
+curves_inv <- expected_values_inv %>%
   filter(between(theta, theta_limits[1], theta_limits[2])) %>%
   mutate(
     item = factor(item_labels[phq_items[item]], levels = item_labels),
@@ -471,17 +470,17 @@ curves <- expected_values_inv %>%
  
 ## Item score functions: expected item score by theta and group
 # Signed difference (SIDS) printed in each panel
-sids_labels <- effect_sizes_inv %>%
+sids_labels_inv <- effect_sizes_inv %>%
   transmute(
     item = factor(item_labels[item], levels = item_labels),
     label = "SIDS = " %+% sprintf("%+.2f", SIDS)
   )
 
-item_score_plot <- curves %>%
+item_score_plot_inv <- curves_inv %>%
   ggplot(aes(theta, ev, color = group)) +
   geom_line(linewidth = .6) +
   geom_text(
-    data = sids_labels,
+    data = sids_labels_inv,
     aes(x = theta_limits[1], y = 3, label = label),
     inherit.aes = FALSE,
     hjust = 0, vjust = 1, size = 7.5 / .pt, color = "grey35"
@@ -501,13 +500,13 @@ item_score_plot <- curves %>%
   labs(title = "Expected Item Score by Group: " %+% scheme_labels[["inv"]]) +
   theme_style()
 
-item_score_plot
+item_score_plot_inv
 
-save_figure(item_score_plot, "Item Score Functions by Group", height = 6)
+save_figure(item_score_plot_inv, "Item Score Functions by Group", height = 6)
 
 
 ## Category response curves: probability of each response option by theta and group
-category_curves <- curves %>%
+category_curves_inv <- curves_inv %>%
   select(theta, item, group, p1:p4) %>%
   pivot_longer(
     cols = p1:p4,
@@ -517,7 +516,7 @@ category_curves <- curves %>%
   mutate(response = factor(response, levels = c("p1", "p2", "p3", "p4"), labels = 0:3))
  
 # Label each category (0-3) above its highest curve, first panel only
-category_labels <- category_curves %>%
+category_labels_inv <- category_curves_inv %>%
   filter(item == item_labels[1]) %>%
   group_by(response) %>%
   slice_max(prob, n = 1, with_ties = FALSE) %>%
@@ -534,11 +533,11 @@ category_labels <- category_curves %>%
     )
   )
  
-category_curve_plot <- category_curves %>%
+category_curve_plot_inv <- category_curves_inv %>%
   ggplot(aes(theta, prob, color = group, group = interaction(group, response))) +
   geom_line(linewidth = .5) +
   geom_text(
-    data = category_labels,
+    data = category_labels_inv,
     aes(label = response),
     color = "grey35", size = 7.5 / .pt,
     show.legend = F
@@ -559,9 +558,9 @@ category_curve_plot <- category_curves %>%
   labs(title = "Category Response Curves by Group: " %+% scheme_labels[["inv"]]) +
   theme_style()
  
-category_curve_plot
+category_curve_plot_inv
 
-save_figure(category_curve_plot, "Category Response Curves by Group", height = 6)
+save_figure(category_curve_plot_inv, "Category Response Curves by Group", height = 6)
 ```
 
 # Alternative IRT Model 1: Empirical Anchors (Items 4, 5)
@@ -655,7 +654,7 @@ expected_values_emp <- map2(
 
 ```{r irt-figures-alt-1}
 ## Prepare curve data for plotting
-curves <- expected_values_emp %>%
+curves_emp <- expected_values_emp %>%
   filter(between(theta, theta_limits[1], theta_limits[2])) %>%
   mutate(
     item = factor(item_labels[phq_items[item]], levels = item_labels),
@@ -665,17 +664,17 @@ curves <- expected_values_emp %>%
  
 ## Item score functions: expected item score by theta and group
 # Signed difference (SIDS) printed in each panel; anchor items labeled as such
-sids_labels <- effect_sizes_emp %>%
+sids_labels_emp <- effect_sizes_emp %>%
   transmute(
     label = if_else(item %in% c("phq_4", "phq_5"), "Anchor Item", "SIDS = " %+% sprintf("%+.2f", SIDS)),
     item = factor(item_labels[item], levels = item_labels)
   )
 
-item_score_plot <- curves %>%
+item_score_plot_emp <- curves_emp %>%
   ggplot(aes(theta, ev, color = group)) +
   geom_line(linewidth = .6) +
   geom_text(
-    data = sids_labels,
+    data = sids_labels_emp,
     aes(x = theta_limits[1], y = 3, label = label),
     inherit.aes = FALSE,
     hjust = 0, vjust = 1, size = 7.5 / .pt, color = "grey35"
@@ -695,9 +694,9 @@ item_score_plot <- curves %>%
   labs(title = "Expected Item Score by Group: " %+% scheme_labels[["emp"]]) +
   theme_style()
 
-item_score_plot
+item_score_plot_emp
 
-save_figure(item_score_plot, "Item Score Functions by Group (Empirical Anchors)", height = 6)
+save_figure(item_score_plot_emp, "Item Score Functions by Group (Empirical Anchors)", height = 6)
 ```
 
 # Alternative IRT Model 2: Theory-Driven Anchors (Items 1, 2)
@@ -791,27 +790,27 @@ expected_values_the <- map2(
 
 ```{r irt-figures-alt-2}
 ## Prepare curve data for plotting
-curves <- expected_values_the %>%
+curves_the <- expected_values_the %>%
   filter(between(theta, theta_limits[1], theta_limits[2])) %>%
   mutate(
     item = factor(item_labels[phq_items[item]], levels = item_labels),
     group = factor(group, levels = c("NHANES", "HMS"))
   )
- 
- 
+
+
 ## Item score functions: expected item score by theta and group
 # Signed difference (SIDS) printed in each panel; anchor items labeled as such
-sids_labels <- effect_sizes_the %>%
+sids_labels_the <- effect_sizes_the %>%
   transmute(
     label = if_else(item %in% c("phq_1", "phq_2"), "Anchor Item", "SIDS = " %+% sprintf("%+.2f", SIDS)),
     item = factor(item_labels[item], levels = item_labels)
   )
 
-item_score_plot <- curves %>%
+item_score_plot_the <- curves_the %>%
   ggplot(aes(theta, ev, color = group)) +
   geom_line(linewidth = .6) +
   geom_text(
-    data = sids_labels,
+    data = sids_labels_the,
     aes(x = theta_limits[1], y = 3, label = label),
     inherit.aes = FALSE,
     hjust = 0, vjust = 1, size = 7.5 / .pt, color = "grey35"
@@ -831,9 +830,9 @@ item_score_plot <- curves %>%
   labs(title = "Expected Item Score by Group: " %+% scheme_labels[["the"]]) +
   theme_style()
 
-item_score_plot
+item_score_plot_the
 
-save_figure(item_score_plot, "Item Score Functions by Group (Theory-Driven Anchors)", height = 6)
+save_figure(item_score_plot_the, "Item Score Functions by Group (Theory-Driven Anchors)", height = 6)
 ```
 
 # Magnitude and Impact
@@ -933,7 +932,10 @@ impact <- list(
   bind_rows()
 
 impact %>%
-  format_table("Test-level DIF: HMS minus NHANES expected total score, averaged over HMS respondents", col.names = c("Scheme", "STDS (signed)", "UTDS (unsigned)"))
+  format_table(
+    "Test-level DIF: HMS minus NHANES expected total score, averaged over HMS respondents", 
+    col.names = c("Scheme", "STDS (signed)", "UTDS (unsigned)")
+  )
 
 
 ## Individual-level DIF impact: naive vs DIF-adjusted theta (Crane et al.)
