@@ -974,6 +974,7 @@ sids_plot <- sids_by_scheme %>%
   ) +
   scale_x_discrete(name = NULL) +
   scale_y_continuous(name = "SIDS: HMS minus NHANES expected item score at the same theta (points, 0-3)") +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 2)) +
   labs(title = "Item-level DIF (SIDS) by anchoring scheme") +
   theme_style() +
   theme(legend.box = "vertical", legend.box.just = "left", legend.spacing.y = unit(2, "pt"), legend.margin = margin(0, 0, 0, 0))
