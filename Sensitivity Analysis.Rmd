@@ -74,7 +74,7 @@ response_colors <- c("#a9c9ef", "#5d9ae3", "#2a78d6", "#0b3f80") # Light to dark
 
 ## Set scheme labels (used in all cross-scheme tables and figures)
 scheme_labels <- c(
-  inv = "No Anchors (All Others)",
+  inv = "No Anchors (All Other Items Constrained)",
   emp = "Empirical Anchors (4, 5)",
   the = "Theory-Driven Anchors (1, 2)"
 )
@@ -430,7 +430,7 @@ sids_comparison_plot <- effect_sizes %>%
   ) +
   scale_x_continuous(name = "SIDS: HMS minus NHANES expected item score at the same theta (points, 0-3)") +
   scale_y_discrete(name = NULL) +
-  labs(title = "Item-level DIF (SIDS): main analysis vs. NHANES 2021-23 only") +
+  labs(title = "Item-Level DIF (SIDS): Main Analysis vs. NHANES 2021-23 Only") +
   theme_style() +
   theme(legend.box = "vertical", legend.box.just = "left", legend.spacing.y = unit(2, "pt"), legend.margin = margin(0, 0, 0, 0), panel.spacing.x = unit(14, "pt"))
 
@@ -524,7 +524,7 @@ tcc_comparison_plot <- tcc_comparison %>%
     limits = c(0, 27),
     breaks = seq(0, 27, 3)
   ) +
-  labs(title = "Expected PHQ-9 total score by group: main analysis vs. NHANES 2021-23 only") +
+  labs(title = "Expected PHQ-9 Total Score by θ, Group, and Anchoring Scheme: Main Analysis vs. NHANES 2021-23 Only") +
   theme_style() +
   theme(legend.box = "vertical", legend.box.just = "left", legend.spacing.y = unit(2, "pt"), legend.margin = margin(0, 0, 0, 0), panel.spacing.x = unit(14, "pt"))
 

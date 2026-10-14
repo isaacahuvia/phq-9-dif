@@ -72,7 +72,7 @@ response_colors <- c("#a9c9ef", "#5d9ae3", "#2a78d6", "#0b3f80") # Light to dark
 
 ## Set scheme labels (used in all cross-scheme tables and figures)
 scheme_labels <- c(
-  inv = "No Anchors (All Others)",
+  inv = "No Anchors (All Other Items Constrained)",
   emp = "Empirical Anchors (4, 5)",
   the = "Theory-Driven Anchors (1, 2)"
 )
@@ -203,7 +203,7 @@ phq_distribution_plot <- sum_score_dist %>%
   ggplot(aes(phq_sum, prop, color = sample_fct)) +
   annotate(
     "rect",
-    xmin = 9.5, xmax = 27.5, ymin = -Inf, ymax = Inf,
+    xmin = 10, xmax = 27, ymin = -Inf, ymax = Inf,
     fill = "#F0F0F0"
   ) +
   annotate(
@@ -231,7 +231,7 @@ phq_distribution_plot <- sum_score_dist %>%
     limits = c(0, .33),
     expand = expansion(mult = c(0, 0))
   ) +
-  labs(title = "PHQ-9 sum score distribution by sample") +
+  labs(title = "PHQ-9 Sum Score Distribution by Sample") +
   theme_style() +
   theme(legend.position = "none")
 
@@ -257,9 +257,33 @@ item_dist <- df %>%
     response = factor(response, levels = 3:0, labels = rev(response_labels)) # So that "not at all" is on the left
   )
 
+# Ratio of endorsement rates (item >= 1), HMS / NHANES, printed to the right of the HMS panel
+endorsement_ratio <- df %>%
+  group_by(sample_fct) %>%
+  summarize(across(all_of(phq_items), ~ mean(.x >= 1))) %>%
+  pivot_longer(cols = all_of(phq_items), names_to = "item", values_to = "p_endorsed") %>%
+  pivot_wider(names_from = sample_fct, values_from = p_endorsed) %>%
+  transmute(
+    sample_fct = factor("HMS", levels = c("NHANES", "HMS")),
+    item = factor(item_labels[item], levels = rev(item_labels)),
+    label = "× " %+% sprintf("%.1f", HMS / NHANES)
+  )
+
 item_response_plot <- item_dist %>%
   ggplot(aes(prop, item, fill = response)) +
   geom_col(width = .75, colour = "white", linewidth = .25) +
+  geom_text(
+    data = endorsement_ratio,
+    aes(x = 1.06, y = item, label = label),
+    inherit.aes = F,
+    hjust = 0, size = 8 / .pt
+  ) +
+  geom_text(
+    data = tibble(sample_fct = factor("HMS", levels = c("NHANES", "HMS"))),
+    aes(x = 1.06, y = length(item_labels) + .6, label = "P(Endorsed)\nHMS ÷ NHANES"),
+    inherit.aes = F,
+    hjust = 0, vjust = 0, lineheight = .9, size = 7.5 / .pt, color = "grey35"
+  ) +
   facet_wrap(
     ~ sample_fct,
     nrow = 1,
@@ -276,7 +300,8 @@ item_response_plot <- item_dist %>%
     expand = expansion(mult = c(0, .01))
   ) +
   scale_y_discrete(name = NULL) +
-  labs(title = "Item response distributions by sample") +
+  coord_cartesian(clip = "off") +
+  labs(title = "Item Response Distributions by Sample") +
   theme_style() +
   theme(
     legend.position = "top",
@@ -286,7 +311,7 @@ item_response_plot <- item_dist %>%
     axis.line.y = element_blank(),
     axis.ticks.y = element_blank(),
     panel.spacing.x = unit(28, "pt"),
-    plot.margin = margin(5.5, 12, 5.5, 5.5)
+    plot.margin = margin(5.5, 62, 5.5, 5.5) # Room for the ratio column
   )
 
 item_response_plot
@@ -473,7 +498,7 @@ item_score_plot <- curves %>%
     limits = c(0, 3),
     breaks = 0:3
   ) +
-  labs(title = "Expected item score by group: " %+% scheme_labels[["inv"]]) +
+  labs(title = "Expected Item Score by Group: " %+% scheme_labels[["inv"]]) +
   theme_style()
 
 item_score_plot
@@ -531,7 +556,7 @@ category_curve_plot <- category_curves %>%
     breaks = seq(0, 1, .25),
     labels = percent
   ) +
-  labs(title = "Category response curves by group: " %+% scheme_labels[["inv"]]) +
+  labs(title = "Category Response Curves by Group: " %+% scheme_labels[["inv"]]) +
   theme_style()
  
 category_curve_plot
@@ -667,7 +692,7 @@ item_score_plot <- curves %>%
     limits = c(0, 3),
     breaks = 0:3
   ) +
-  labs(title = "Expected item score by group: " %+% scheme_labels[["emp"]]) +
+  labs(title = "Expected Item Score by Group: " %+% scheme_labels[["emp"]]) +
   theme_style()
 
 item_score_plot
@@ -803,7 +828,7 @@ item_score_plot <- curves %>%
     limits = c(0, 3),
     breaks = 0:3
   ) +
-  labs(title = "Expected item score by group: " %+% scheme_labels[["the"]]) +
+  labs(title = "Expected Item Score by Group: " %+% scheme_labels[["the"]]) +
   theme_style()
 
 item_score_plot
@@ -862,7 +887,7 @@ tcc_plot <- tcc %>%
     limits = c(0, 27),
     breaks = seq(0, 27, 3)
   ) +
-  labs(title = "Expected PHQ-9 total score by group and anchoring scheme") +
+  labs(title = "Expected PHQ-9 Total Score by θ, Group, and Anchoring Scheme") +
   theme_style() +
   theme(panel.spacing.x = unit(14, "pt"))
 
@@ -975,7 +1000,7 @@ sids_plot <- sids_by_scheme %>%
   scale_x_discrete(name = NULL) +
   scale_y_continuous(name = "SIDS: HMS minus NHANES expected item score at the same theta (points, 0-3)") +
   guides(color = guide_legend(order = 1), shape = guide_legend(order = 2)) +
-  labs(title = "Item-level DIF (SIDS) by anchoring scheme") +
+  labs(title = "Item-Level DIF (SIDS) by Anchoring Scheme") +
   theme_style() +
   theme(legend.box = "vertical", legend.box.just = "left", legend.spacing.y = unit(2, "pt"), legend.margin = margin(0, 0, 0, 0))
 
@@ -1096,7 +1121,7 @@ prevalence_plot <- prevalence %>%
   ) +
   scale_y_discrete(name = NULL) +
   coord_cartesian(clip = "off") +
-  labs(title = "Positive screens by screening method and sample") +
+  labs(title = "Positive Screens by Screening Method and Sample") +
   theme_style() +
   theme(panel.grid.major.x = element_line(color = "grey92", linewidth = .3))
 
