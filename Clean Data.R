@@ -25,7 +25,6 @@ hms_data <- here("Data", "HMS", "HMS_2025-2026_PUBLIC_instchars.csv") %>%
   mutate(
     across(starts_with("phq"), ~ . - 1),
     phq_sum = phq9_1 + phq9_2 + phq9_3 + phq9_4 + phq9_5 + phq9_6 + phq9_7 + phq9_8 + phq9_9,
-    sample_hms = 1,
     sample_char = "HMS",
     n_gender = rowSums(!is.na(pick(starts_with("gender_")))),
     gender = case_when(
@@ -60,7 +59,6 @@ hms_data <- here("Data", "HMS", "HMS_2025-2026_PUBLIC_instchars.csv") %>%
     phq_8 = phq9_8,
     phq_9 = phq9_9,
     phq_sum,
-    sample_hms,
     sample_char,
     weight = nrweight,
     psu,
@@ -154,12 +152,10 @@ nhanes_data <- left_join(
   by = "nhanes_id"
 ) %>%
   mutate(
-    sample_hms = 0,
     sample_char = "NHANES"
   ) %>%
   select(
     starts_with("phq"),
-    sample_hms,
     sample_char,
     nhanes_yr,
     nhanes_id,
@@ -178,6 +174,7 @@ combined_data <- bind_rows(
   nhanes_data
 ) %>%
   mutate(
+    sample_fct = factor(sample_char, levels = c("NHANES", "HMS")),
     most_recent_survey = case_when(
       sample_char == "HMS" ~ T,
       sample_char == "NHANES" & nhanes_yr == "2021-2023" ~ T,
