@@ -64,6 +64,14 @@ response_labels <- c(
 sample_colors <- c("NHANES" = "#0072B2", "HMS" = "#D55E00")
 
 response_colors <- c("#E0E0E0", "#A6A6A6", "#6E6E6E", "#333333")
+
+
+## Set scheme labels (used in all cross-scheme tables and figures)
+scheme_labels <- c(
+  inv = "No Anchors (All Others)",
+  emp = "Empirical Anchors (4, 5)",
+  the = "Theory-Driven Anchors (1, 2)"
+)
  
 theme_style <- function(base_size = 9) {
   theme_classic(base_size = base_size) +
@@ -123,7 +131,7 @@ phq_distribution_plot <- sum_score_dist %>%
   ggplot(aes(phq_sum, prop, color = sample_fct)) +
   annotate(
     "rect",
-    xmin = 10, xmax = 27, ymin = -Inf, ymax = Inf,
+    xmin = 9.5, xmax = 27.5, ymin = -Inf, ymax = Inf,
     fill = "#F0F0F0"
   ) +
   annotate(
@@ -325,7 +333,7 @@ expected_values_inv <- map2(
     
     model_.x <- released_models[[.x]]
     
-    item_.x_.y <- extract.item(model_.x, .x, .y)
+    item_.x_.y <- extract.item(extract.group(model_.x, .y), .x) # Group first: works across mirt versions
 
     expected_values_.x_.y <- tibble(theta = seq(-5, 5, .01)) %>%
       mutate(
@@ -381,7 +389,7 @@ item_score_plot <- curves %>%
   scale_x_continuous(
     name = expression("Depression (" * theta * ", NHANES SD units)"),
     limits = theta_limits,
-    breaks = -3:4
+    breaks = theta_limits[1]:theta_limits[2]
   ) +
   scale_y_continuous(
     name = "Expected item score",
@@ -437,7 +445,7 @@ category_curve_plot <- category_curves %>%
   scale_x_continuous(
     name = expression("Depression (" * theta * ", NHANES SD units)"),
     limits = theta_limits,
-    breaks = -3:4
+    breaks = theta_limits[1]:theta_limits[2]
   ) +
   scale_y_continuous(
     name = "Probability of response",
@@ -520,7 +528,7 @@ expected_values_emp <- map2(
   .y = item_group_combinations$group,
   .f = ~ {
     
-    item_.x_.y <- extract.item(model_emp, .x, .y)
+    item_.x_.y <- extract.item(extract.group(model_emp, .y), .x) # Group first: works across mirt versions
 
     expected_values_.x_.y <- tibble(theta = seq(-5, 5, .01)) %>%
       mutate(
@@ -570,7 +578,7 @@ item_score_plot <- curves %>%
   scale_x_continuous(
     name = expression("Depression (" * theta * ", NHANES SD units)"),
     limits = theta_limits,
-    breaks = -3:4
+    breaks = theta_limits[1]:theta_limits[2]
   ) +
   scale_y_continuous(
     name = "Expected item score",
@@ -652,7 +660,7 @@ expected_values_the <- map2(
   .y = item_group_combinations$group,
   .f = ~ {
     
-    item_.x_.y <- extract.item(model_the, .x, .y)
+    item_.x_.y <- extract.item(extract.group(model_the, .y), .x) # Group first: works across mirt versions
 
     expected_values_.x_.y <- tibble(theta = seq(-5, 5, .01)) %>%
       mutate(
@@ -702,7 +710,7 @@ item_score_plot <- curves %>%
   scale_x_continuous(
     name = expression("Depression (" * theta * ", NHANES SD units)"),
     limits = theta_limits,
-    breaks = -3:4
+    breaks = theta_limits[1]:theta_limits[2]
   ) +
   scale_y_continuous(
     name = "Expected item score",
@@ -713,18 +721,15 @@ item_score_plot <- curves %>%
 
 item_score_plot
 
-save_figure(item_score_plot, "Item Score Functions by Group (Empirical Anchors)", height = 6)
+save_figure(item_score_plot, "Item Score Functions by Group (Theory-Driven Anchors)", height = 6)
 ```
 
 # Magnitude and Impact
 
 ```{r dif-magnitude-impact}
 ## Latent means and SDs under each scheme (HMS only; NHANES is reference group so distributed 0, 1)
-latent_means <- list(
-  "Main (all others)" = model_inv,
-  "Anchors 4, 5" = model_emp,
-  "Anchors 1, 2" = model_the
-) %>%
+latent_means <- list(model_inv, model_emp, model_the) %>%
+  set_names(scheme_labels) %>%
   imap(~ {
     hms <- coef(.x, simplify = T)$HMS
     tibble(
@@ -739,11 +744,8 @@ latent_means
 
 
 ## Plot test characteristic curves (TCCs)
-tcc <- list(
-  "Main (all others)" = expected_values_inv,
-  "Anchors 4, 5"      = expected_values_emp,
-  "Anchors 1, 2"      = expected_values_the
-) %>%
+tcc <- list(expected_values_inv, expected_values_emp, expected_values_the) %>%
+  set_names(scheme_labels) %>%
   imap(~ .x %>%
     filter(between(theta, -3, 4)) %>%
     group_by(theta, group) %>%
@@ -752,7 +754,7 @@ tcc <- list(
   ) %>%
   bind_rows() %>%
   mutate(
-    scheme = factor(scheme, levels = c("Main (all others)", "Anchors 4, 5", "Anchors 1, 2")),
+    scheme = factor(scheme, levels = scheme_labels),
     group = factor(group, levels = c("NHANES", "HMS"))
   )
 
@@ -777,15 +779,16 @@ tcc_plot <- tcc %>%
 
 tcc_plot
 
-save_figure(tcc_plot, "Figure - Test Characteristic Curves by Group", height = 3.2)
+save_figure(tcc_plot, "Test Characteristic Curves by Group", height = 3.2)
 
 
 ## Scale-wide impact by scheme
 impact <- list(
-  "No Anchors (Iterative)" = list(ev = expected_values_inv, mod = model_inv),
-  "Empirical Anchors (4, 5)" = list(ev = expected_values_emp, mod = model_emp),
-  "Theory-Driven Anchors (1, 2)" = list(ev = expected_values_the, mod = model_the)
+  list(ev = expected_values_inv, mod = model_inv),
+  list(ev = expected_values_emp, mod = model_emp),
+  list(ev = expected_values_the, mod = model_the)
 ) %>%
+  set_names(scheme_labels) %>%
   imap(~ {
     
     # EAP theta for each HMS respondent
@@ -824,10 +827,8 @@ impact
 theta_naive <- fscores(model_inv, method = "EAP", full.scores.SE = T)
 salient_threshold <- median(theta_naive[, "SE_F1"])
 
-individual_impact <- list(
-  "Anchors 4, 5" = model_emp,
-  "Anchors 1, 2" = model_the
-) %>%
+individual_impact <- list(model_emp, model_the) %>%
+  set_names(scheme_labels[c("emp", "the")]) %>%
   imap(~ tibble(
     scheme = .y,
     sample = df$sample_fct,
@@ -903,7 +904,7 @@ prevalence <- expand_grid(
 ) %>%
   mutate(
     est = map2(sample, screen, ~ svyciprop(as.formula("~" %+% .y), designs[[.x]], method = "logit")),
-    prevalence = as.numeric(est),
+    prevalence = map_dbl(est, as.numeric),
     lower = map_dbl(est, ~ confint(.x)[1]),
     upper = map_dbl(est, ~ confint(.x)[2]),
     sample = factor(sample, levels = names(designs)),
