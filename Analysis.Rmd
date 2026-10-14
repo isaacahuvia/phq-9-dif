@@ -63,7 +63,7 @@ response_labels <- c(
 ## Set visual style
 sample_colors <- c("NHANES" = "#0072B2", "HMS" = "#D55E00")
 
-response_colors <- c("#E0E0E0", "#A6A6A6", "#6E6E6E", "#333333")
+response_colors <- c("#a9c9ef", "#5d9ae3", "#2a78d6", "#0b3f80") # Light to dark blue: "not at all" to "nearly every day"
 
 
 ## Set scheme labels (used in all cross-scheme tables and figures)
@@ -79,6 +79,8 @@ theme_style <- function(base_size = 9) {
       legend.position = "top",
       legend.justification = "left",
       legend.title = element_blank(),
+      plot.title = element_text(face = "bold", size = base_size + 1),
+      plot.title.position = "plot",
       strip.background = element_blank(),
       strip.text = element_text(hjust = 0),
       panel.spacing = unit(10, "pt")
@@ -159,6 +161,7 @@ phq_distribution_plot <- sum_score_dist %>%
     limits = c(0, .33),
     expand = expansion(mult = c(0, 0))
   ) +
+  labs(title = "PHQ-9 sum score distribution by sample") +
   theme_style() +
   theme(legend.position = "none")
 
@@ -203,6 +206,7 @@ item_response_plot <- item_dist %>%
     expand = expansion(mult = c(0, .01))
   ) +
   scale_y_discrete(name = NULL) +
+  labs(title = "Item response distributions by sample") +
   theme_style() +
   theme(
     legend.position = "top",
@@ -396,6 +400,7 @@ item_score_plot <- curves %>%
     limits = c(0, 3),
     breaks = 0:3
   ) +
+  labs(title = "Expected item score by group: " %+% scheme_labels[["inv"]]) +
   theme_style()
 
 item_score_plot
@@ -453,6 +458,7 @@ category_curve_plot <- category_curves %>%
     breaks = seq(0, 1, .25),
     labels = percent
   ) +
+  labs(title = "Category response curves by group: " %+% scheme_labels[["inv"]]) +
   theme_style()
  
 category_curve_plot
@@ -557,11 +563,11 @@ curves <- expected_values_emp %>%
  
  
 ## Item score functions: expected item score by theta and group
-# Signed difference (SIDS) printed in each panel
+# Signed difference (SIDS) printed in each panel; anchor items labeled as such
 sids_labels <- effect_sizes_emp %>%
   transmute(
-    item = factor(item_labels[item], levels = item_labels),
-    label = "SIDS = " %+% sprintf("%+.2f", SIDS)
+    label = if_else(item %in% c("phq_4", "phq_5"), "Anchor Item", "SIDS = " %+% sprintf("%+.2f", SIDS)),
+    item = factor(item_labels[item], levels = item_labels)
   )
 
 item_score_plot <- curves %>%
@@ -585,6 +591,7 @@ item_score_plot <- curves %>%
     limits = c(0, 3),
     breaks = 0:3
   ) +
+  labs(title = "Expected item score by group: " %+% scheme_labels[["emp"]]) +
   theme_style()
 
 item_score_plot
@@ -689,11 +696,11 @@ curves <- expected_values_the %>%
  
  
 ## Item score functions: expected item score by theta and group
-# Signed difference (SIDS) printed in each panel
+# Signed difference (SIDS) printed in each panel; anchor items labeled as such
 sids_labels <- effect_sizes_the %>%
   transmute(
-    item = factor(item_labels[item], levels = item_labels),
-    label = "SIDS = " %+% sprintf("%+.2f", SIDS)
+    label = if_else(item %in% c("phq_1", "phq_2"), "Anchor Item", "SIDS = " %+% sprintf("%+.2f", SIDS)),
+    item = factor(item_labels[item], levels = item_labels)
   )
 
 item_score_plot <- curves %>%
@@ -717,6 +724,7 @@ item_score_plot <- curves %>%
     limits = c(0, 3),
     breaks = 0:3
   ) +
+  labs(title = "Expected item score by group: " %+% scheme_labels[["the"]]) +
   theme_style()
 
 item_score_plot
@@ -774,6 +782,7 @@ tcc_plot <- tcc %>%
     limits = c(0, 27),
     breaks = seq(0, 27, 3)
   ) +
+  labs(title = "Expected PHQ-9 total score by group and anchoring scheme") +
   theme_style() +
   theme(panel.spacing.x = unit(14, "pt"))
 
