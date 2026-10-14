@@ -72,6 +72,8 @@ scheme_labels <- c(
   emp = "Empirical Anchors (4, 5)",
   the = "Theory-Driven Anchors (1, 2)"
 )
+
+scheme_colors <- set_names(c("#1B2430", "#1baf7a", "#6250d6"), scheme_labels)
  
 theme_style <- function(base_size = 9) {
   theme_classic(base_size = base_size) +
@@ -859,6 +861,41 @@ individual_impact_summary <- individual_impact %>%
   )
 
 individual_impact_summary
+
+
+## Item-level DIF (SIDS) by scheme
+sids_by_scheme <- list(effect_sizes_inv, effect_sizes_emp, effect_sizes_the) %>%
+  set_names(scheme_labels) %>%
+  bind_rows(.id = "scheme") %>%
+  mutate(
+    anchor = case_when(
+      scheme == scheme_labels[["emp"]] ~ item %in% c("phq_4", "phq_5"),
+      scheme == scheme_labels[["the"]] ~ item %in% c("phq_1", "phq_2"),
+      TRUE ~ FALSE
+    ),
+    scheme = factor(scheme, levels = scheme_labels),
+    item = factor(item_labels[item], levels = rev(item_labels)) # So that item 1 is at the top
+  )
+
+sids_plot <- sids_by_scheme %>%
+  ggplot(aes(item, SIDS, color = scheme, shape = anchor, group = fct_rev(scheme))) +
+  geom_hline(yintercept = 0, color = "grey50", linewidth = .3) +
+  geom_point(size = 2, position = position_dodge(width = .6)) +
+  coord_flip() +
+  scale_color_manual(values = scheme_colors) +
+  scale_shape_manual(
+    values = c(`FALSE` = 16, `TRUE` = 1),
+    labels = c(`FALSE` = "Studied item", `TRUE` = "Anchor item")
+  ) +
+  scale_x_discrete(name = NULL) +
+  scale_y_continuous(name = "SIDS: HMS minus NHANES expected item score at the same theta (points, 0-3)") +
+  labs(title = "Item-level DIF (SIDS) by anchoring scheme") +
+  theme_style() +
+  theme(legend.box = "vertical", legend.box.just = "left")
+
+sids_plot
+
+save_figure(sids_plot, "SIDS by Scheme", height = 5)
 ```
 
 # Depression Prevalence by Screening Methodology
@@ -878,9 +915,9 @@ df_screen <- df %>%
   )
 
 screen_labels <- c(
-  screen_phq9 = "PHQ-9 >= 10", # (1)
-  screen_phq2 = "PHQ-2 >= 3", # (2)
-  screen_phq2_phq9 = "PHQ-2 >= 3 and PHQ-9 >= 10", # (2)
+  screen_phq9 = "PHQ-9 ≥ 10", # (1)
+  screen_phq2 = "PHQ-2 ≥ 3", # (2)
+  screen_phq2_phq9 = "PHQ-2 ≥ 3 and PHQ-9 ≥ 10", # (2)
   screen_algorithm = "DSM-5 algorithm" # (1) (3)
 )
 
@@ -939,4 +976,41 @@ prevalence_table <- prevalence %>%
   arrange(screen)
 
 prevalence_table
+
+
+## Plot: prevalence (95% CI) by screening method and sample, with HMS / NHANES ratio
+prevalence_plot <- prevalence %>%
+  ggplot(aes(prevalence, fct_rev(screen), color = sample)) +
+  geom_linerange(aes(xmin = lower, xmax = upper), linewidth = .6) +
+  geom_point(size = 2) +
+  geom_text(
+    data = prevalence_table,
+    aes(x = .42, y = fct_rev(screen), label = "× " %+% sprintf("%.1f", ratio)),
+    inherit.aes = F,
+    hjust = 0, size = 8 / .pt
+  ) +
+  annotate(
+    "text",
+    x = .42, y = length(screen_labels) + .5, label = "HMS ÷ NHANES",
+    hjust = 0, size = 7.5 / .pt, color = "grey35"
+  ) +
+  scale_color_manual(
+    values = sample_colors,
+    labels = c(NHANES = "NHANES 2021–23", HMS = "HMS 2025–26")
+  ) +
+  scale_x_continuous(
+    name = "Weighted prevalence of a positive screen (95% CI)",
+    labels = percent,
+    limits = c(0, .47),
+    breaks = seq(0, .4, .1)
+  ) +
+  scale_y_discrete(name = NULL) +
+  coord_cartesian(clip = "off") +
+  labs(title = "Positive screens by screening method and sample") +
+  theme_style() +
+  theme(panel.grid.major.x = element_line(color = "grey92", linewidth = .3))
+
+prevalence_plot
+
+save_figure(prevalence_plot, "Prevalence by Screening Method", height = 3.2)
 ```
