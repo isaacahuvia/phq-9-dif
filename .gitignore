@@ -4,7 +4,5 @@
 .Ruserdata
 Data
 .rds
-Analysis_files/
-Analysis_cache/
-Sensitivity-Analysis_files/
-Sensitivity-Analysis_cache/
+*_files/
+*_cache/

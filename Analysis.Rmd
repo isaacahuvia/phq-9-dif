@@ -158,7 +158,7 @@ effect_size_table <- function(effect_sizes, caption) {
 
 save_figure <- function(plot, name, height, width = 7) {
   ggsave(
-    filename = here("Figure - " %+% name %+% ".png"),
+    filename = here("Figures", name %+% ".png"),
     plot = plot,
     width = width,
     height = height,

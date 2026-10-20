@@ -1,5 +1,5 @@
 ---
-title: "PHQ-9 DIF Sensitivity Analysis: NHANES 2021-2023 Only"
+title: "PHQ-9 DIF Sensitivity Analysis: 2025-2026 HMS vs 2021-2023 NHANES"
 output: html_document
 date: "`r Sys.Date()`"
 editor_options: 
@@ -156,7 +156,7 @@ effect_size_table <- function(effect_sizes, caption) {
 
 save_figure <- function(plot, name, height, width = 7) {
   ggsave(
-    filename = here("Figure - " %+% name %+% ".png"),
+    filename = here("Sensitivity Analyses", "Figures", name %+% ".png"),
     plot = plot,
     width = width,
     height = height,
@@ -436,7 +436,7 @@ sids_comparison_plot <- effect_sizes %>%
 
 sids_comparison_plot
 
-save_figure(sids_comparison_plot, "Sensitivity - SIDS, Main vs 2021-23", height = 4.5, width = 8)
+save_figure(sids_comparison_plot, "2025-26 HMS vs 2021-23 NHANES - SIDS, Main vs Sensitivity", height = 4.5, width = 8)
 ```
 
 ## Latent Means and Test-Level Impact
@@ -530,5 +530,5 @@ tcc_comparison_plot <- tcc_comparison %>%
 
 tcc_comparison_plot
 
-save_figure(tcc_comparison_plot, "Sensitivity - Test Characteristic Curves, Main vs 2021-23", height = 3.6, width = 8)
+save_figure(tcc_comparison_plot, "2025-26 HMS vs 2021-23 NHANES - Test Characteristic Curves, Main vs Sensitivity", height = 3.6, width = 8)
 ```
