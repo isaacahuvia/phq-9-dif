@@ -893,6 +893,7 @@ impact <- list(
   bind_rows()
 
 impact %>%
+    mutate(scheme = if_else(scheme == scheme_labels[["inv"]], "No Anchors (Fully Constrained Model)", scheme)) %>% # Mean comes from model_inv, not the released models
   format_table(
     "Test-level DIF: HMS minus NHANES expected total score, averaged over HMS respondents", 
     col.names = c("Scheme", "STDS (signed)", "UTDS (unsigned)")
