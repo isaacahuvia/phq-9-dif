@@ -852,6 +852,7 @@ latent_means <- list(model_inv, model_emp, model_the) %>%
   bind_rows()
 
 latent_means %>%
+  mutate(model = if_else(model == scheme_labels[["inv"]], "No Anchors (Fully Constrained Model)", model)) %>% # Mean comes from model_inv, not the released models
   format_table("HMS latent mean and SD by scheme (NHANES fixed at mean 0, SD 1)", col.names = c("Scheme", "Mean", "SD"))
 
 
@@ -1006,13 +1007,13 @@ sids_by_scheme <- list(effect_sizes_inv, effect_sizes_emp, effect_sizes_the) %>%
 
 sids_plot <- sids_by_scheme %>%
   ggplot(aes(item, SIDS, color = scheme, shape = anchor, group = fct_rev(scheme))) +
-  geom_vline(xintercept = seq(1.5, length(item_labels) - .5, 1), color = "grey80", linewidth = .3, linetype = "dashed") + # Separate items (horizontal after coord_flip)
   geom_hline(yintercept = 0, color = "grey50", linewidth = .3) +
-  geom_point(size = 2, position = position_dodge(width = .6)) +
+  geom_linerange(aes(ymin = 0, ymax = SIDS), linewidth = .5, position = position_dodge(width = .5), show.legend = F) + # Line from zero to each dot
+  geom_point(size = 2, fill = "white", position = position_dodge(width = .5)) + # Dodge < 1 so dots within an item sit closer than items do
   coord_flip() +
   scale_color_manual(values = scheme_colors) +
   scale_shape_manual(
-    values = c(`FALSE` = 16, `TRUE` = 1),
+    values = c(`FALSE` = 16, `TRUE` = 21), # 21: hollow circle with white fill, so the zero line doesn't show through
     labels = c(`FALSE` = "Studied item", `TRUE` = "Anchor item")
   ) +
   scale_x_discrete(name = NULL) +
