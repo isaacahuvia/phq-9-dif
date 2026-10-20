@@ -3839,7 +3839,7 @@ latent_means &lt;- list(model_inv, model_emp, model_the) %&gt;%
 latent_means %&gt;%
   mutate(model = if_else(model == scheme_labels[[&quot;inv&quot;]], &quot;No Anchors (Fully Constrained Model)&quot;, model)) %&gt;% # Mean comes from model_inv, not the released models
   format_table(&quot;HMS latent mean and SD by scheme (NHANES fixed at mean 0, SD 1)&quot;, col.names = c(&quot;Scheme&quot;, &quot;Mean&quot;, &quot;SD&quot;))</code></pre>
-<table class="table table-striped table-condensed table-hover" style="width: auto !important; ">
+<table class="table table-striped table-condensed table-hover" style="color: black; width: auto !important; ">
 <caption>
 HMS latent mean and SD by scheme (NHANES fixed at mean 0, SD 1)
 </caption>
@@ -3934,7 +3934,7 @@ impact %&gt;%
     &quot;Test-level DIF: HMS minus NHANES expected total score, averaged over HMS respondents&quot;, 
     col.names = c(&quot;Scheme&quot;, &quot;STDS (signed)&quot;, &quot;UTDS (unsigned)&quot;)
   )</code></pre>
-<table class="table table-striped table-condensed table-hover" style="width: auto !important; ">
+<table class="table table-striped table-condensed table-hover" style="color: black; width: auto !important; ">
 <caption>
 Test-level DIF: HMS minus NHANES expected total score, averaged over HMS
 respondents
