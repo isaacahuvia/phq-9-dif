@@ -663,19 +663,21 @@ prevalence_table %>%
 
 
 ## Plot: prevalence (95% CI) by screening method and sample, with HMS / NHANES ratio
+ratio_x <- ceiling(max(prevalence$upper) * 20) / 20 + .02 # Ratio column sits just right of the widest CI
+
 prevalence_plot <- prevalence %>%
   ggplot(aes(prevalence, fct_rev(screen), color = sample)) +
   geom_linerange(aes(xmin = lower, xmax = upper), linewidth = .6) +
   geom_point(size = 2) +
   geom_text(
     data = prevalence_table,
-    aes(x = .42, y = fct_rev(screen), label = "× " %+% sprintf("%.1f", ratio)),
+    aes(x = ratio_x, y = fct_rev(screen), label = "× " %+% sprintf("%.1f", ratio)),
     inherit.aes = F,
     hjust = 0, size = 8 / .pt
   ) +
   annotate(
     "text",
-    x = .42, y = length(screen_labels) + .5, label = "HMS ÷ NHANES",
+    x = ratio_x, y = length(screen_labels) + .5, label = "HMS ÷ NHANES",
     hjust = 0, size = 7.5 / .pt, color = "grey35"
   ) +
   scale_color_manual(
@@ -685,8 +687,8 @@ prevalence_plot <- prevalence %>%
   scale_x_continuous(
     name = "Weighted prevalence of a positive screen (95% CI)",
     labels = percent,
-    limits = c(0, .47),
-    breaks = seq(0, .4, .1)
+    limits = c(0, ratio_x + .05),
+    breaks = seq(0, floor(ratio_x * 10) / 10, .1)
   ) +
   scale_y_discrete(name = NULL) +
   coord_cartesian(clip = "off") +
