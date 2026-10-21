@@ -22,6 +22,7 @@ library(mirt)
 library(knitr)
 library(kableExtra)
 library(scales)
+library(survey)
 library(tidyverse)
 `%+%` <- paste0
 
@@ -33,7 +34,6 @@ df <- readRDS(here("Data", "Clean Data.rds"))
 
 # Sensitivity sample: all HMS, NHANES 2021-2023 only
 # All three schemes are refit on the pooled (main) data and on these data, for direct comparison
-# Prevalence is not repeated here: Analysis.Rmd already uses NHANES 2021-2023 for prevalence
 df_recent <- df %>%
   filter(most_recent_survey)
 
@@ -531,4 +531,118 @@ tcc_comparison_plot <- tcc_comparison %>%
 tcc_comparison_plot
 
 save_figure(tcc_comparison_plot, "2025-26 HMS vs 2021-23 NHANES - Test Characteristic Curves, Main vs Sensitivity", height = 3.6, width = 8)
+```
+
+# Depression Prevalence by Screening Methodology
+
+```{r depression-prevalence}
+options(survey.lonely.psu = "adjust")
+
+## Screening definitions (each a 0/1 indicator)
+add_screens <- function(data) {
+  data %>%
+    mutate(
+      phq_2_sum = phq_1 + phq_2,
+      n_criteria = rowSums(across(phq_1:phq_9, ~ . >= 2)),
+      screen_phq9 = as.numeric(phq_sum >= 10),
+      screen_phq2 = as.numeric(phq_2_sum >= 3),
+      screen_phq2_phq9 = as.numeric(phq_2_sum >= 3 & phq_sum >= 10),
+      screen_algorithm = as.numeric(n_criteria >= 5 & (phq_1 >= 2 | phq_2 >= 2))
+    )
+}
+
+screen_labels <- c(
+  screen_phq9 = "PHQ-9 ≥ 10",
+  screen_phq2 = "PHQ-2 ≥ 3",
+  screen_phq2_phq9 = "PHQ-2 ≥ 3 and PHQ-9 ≥ 10",
+  screen_algorithm = "DSM-5 algorithm"
+)
+
+
+## Survey designs
+# NHANES: build on all cycles, then subset to 2021-2023 (as in Analysis.Rmd)
+nhanes_design <- svydesign(
+  data = df %>% filter(sample_fct == "NHANES") %>% add_screens(),
+  ids = ~ psu, strata = ~ strata, weights = ~ weight, nest = TRUE
+) %>%
+  subset(most_recent_survey)
+
+# HMS 2025-2026: clustered by school, nonresponse weights
+hms_design <- svydesign(
+  data = df_recent %>% filter(sample_fct == "HMS") %>% add_screens(),
+  ids = ~ psu, weights = ~ weight
+)
+
+
+## Weighted prevalence (logit CIs) by screening definition and sample
+designs <- list(NHANES = nhanes_design, HMS = hms_design)
+
+prevalence <- expand_grid(
+  sample = names(designs),
+  screen = names(screen_labels)
+) %>%
+  mutate(
+    est = map2(sample, screen, ~ svyciprop(as.formula("~" %+% .y), designs[[.x]], method = "logit")),
+    prevalence = map_dbl(est, as.numeric),
+    lower = map_dbl(est, ~ confint(.x)[1]),
+    upper = map_dbl(est, ~ confint(.x)[2]),
+    sample = factor(sample, levels = names(designs)),
+    screen = factor(screen_labels[screen], levels = screen_labels)
+  ) %>%
+  select(-est)
+
+
+## Table: prevalence (95% CI) by sample, plus HMS / NHANES ratio
+prevalence_table <- prevalence %>%
+  mutate(estimate = percent(prevalence, .1) %+% " (" %+% percent(lower, .1) %+% ", " %+% percent(upper, .1) %+% ")") %>%
+  select(screen, sample, estimate, prevalence) %>%
+  pivot_wider(names_from = sample, values_from = c(estimate, prevalence)) %>%
+  mutate(ratio = round(prevalence_HMS / prevalence_NHANES, 1)) %>%
+  select(screen, NHANES = estimate_NHANES, HMS = estimate_HMS, ratio) %>%
+  arrange(screen)
+
+prevalence_table %>%
+  format_table(
+    "Weighted prevalence of a positive screen, % (95% CI); NHANES 2021-23, HMS 2025-26",
+    col.names = c("Screening method", "NHANES", "HMS", "HMS / NHANES")
+  )
+
+
+## Plot: prevalence (95% CI) by screening method and sample, with HMS / NHANES ratio
+ratio_x <- ceiling(max(prevalence$upper) * 20) / 20 + .02 # Ratio column sits just right of the widest CI
+
+prevalence_plot <- prevalence %>%
+  ggplot(aes(prevalence, fct_rev(screen), color = sample)) +
+  geom_linerange(aes(xmin = lower, xmax = upper), linewidth = .6) +
+  geom_point(size = 2) +
+  geom_text(
+    data = prevalence_table,
+    aes(x = ratio_x, y = fct_rev(screen), label = "× " %+% sprintf("%.1f", ratio)),
+    inherit.aes = F,
+    hjust = 0, size = 8 / .pt
+  ) +
+  annotate(
+    "text",
+    x = ratio_x, y = length(screen_labels) + .5, label = "HMS ÷ NHANES",
+    hjust = 0, size = 7.5 / .pt, color = "grey35"
+  ) +
+  scale_color_manual(
+    values = sample_colors,
+    labels = c(NHANES = "NHANES 2021–23", HMS = "HMS 2025–26")
+  ) +
+  scale_x_continuous(
+    name = "Weighted prevalence of a positive screen (95% CI)",
+    labels = percent,
+    limits = c(0, ratio_x + .05),
+    breaks = seq(0, floor(ratio_x * 10) / 10, .1)
+  ) +
+  scale_y_discrete(name = NULL) +
+  coord_cartesian(clip = "off") +
+  labs(title = "Positive Screens by Screening Method and Sample") +
+  theme_style() +
+  theme(panel.grid.major.x = element_line(color = "grey92", linewidth = .3))
+
+prevalence_plot
+
+save_figure(prevalence_plot, "2025-26 HMS vs 2021-23 NHANES - Prevalence by Screening Method", height = 3.2)
 ```

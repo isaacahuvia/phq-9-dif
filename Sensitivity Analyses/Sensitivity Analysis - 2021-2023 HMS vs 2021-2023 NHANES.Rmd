@@ -1,0 +1,702 @@
+---
+title: "PHQ-9 DIF Sensitivity Analysis: 2021-2023 HMS vs 2021-2023 NHANES"
+output: html_document
+date: "`r Sys.Date()`"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r startup, include = F}
+## Set chunk options
+knitr::opts_chunk$set(
+  cache.extra = tools::md5sum(c(
+    here::here("Data", "Clean Data.rds"),
+    here::here("Data", "HMS", "HMS_2021-2022_PUBLIC_instchars.csv"),
+    here::here("Data", "HMS", "HMS_2022-2023_PUBLIC_instchars.csv")
+  )) # Some chunks cache objects; reset them if any input data change
+)
+
+## Set seed
+set.seed(57135)
+
+
+## Load packages
+library(here)
+library(mirt)
+library(knitr)
+library(kableExtra)
+library(scales)
+library(survey)
+library(vroom)
+library(tidyverse)
+`%+%` <- paste0
+
+conflicted::conflict_prefer_all("dplyr", quiet = T)
+
+
+## Load data
+df <- readRDS(here("Data", "Clean Data.rds"))
+
+# Sensitivity sample: HMS 2021-2022 and 2022-2023, NHANES 2021-2023
+# All three schemes are refit on the main data and on these data, for direct comparison
+# Known limitations:
+#   (a) The windows don't match exactly: HMS covers fall 2021 to spring 2023, so it misses
+#       spring 2021 and fall 2023, which NHANES 2021-2023 (August 2021 to August 2023) includes
+#   (b) HMS respondents can't be deduplicated across years, so some students may appear twice
+
+# HMS 2021-2023: cleaning borrowed from Clean Data.R (PHQ items recoded 1-4 -> 0-3)
+# Demographics are not kept: they are coded differently across years and not used here
+hms_recent <- c(
+  "2021-2022" = "HMS_2021-2022_PUBLIC_instchars.csv",
+  "2022-2023" = "HMS_2022-2023_PUBLIC_instchars.csv"
+) %>%
+  map(~ here("Data", "HMS", .x) %>%
+    vroom(
+      col_select = c(nrweight, starts_with("phq9"), age, psu = schoolnum),
+      show_col_types = F
+    )
+  ) %>%
+  bind_rows(.id = "year") %>% # HMS year, used as a stratum in the survey design (school numbers are not stable across years)
+  mutate(
+    across(starts_with("phq"), ~ . - 1),
+    phq_sum = phq9_1 + phq9_2 + phq9_3 + phq9_4 + phq9_5 + phq9_6 + phq9_7 + phq9_8 + phq9_9,
+    sample_char = "HMS"
+  ) %>%
+  select(
+    phq_1 = phq9_1,
+    phq_2 = phq9_2,
+    phq_3 = phq9_3,
+    phq_4 = phq9_4,
+    phq_5 = phq9_5,
+    phq_6 = phq9_6,
+    phq_7 = phq9_7,
+    phq_8 = phq9_8,
+    phq_9 = phq9_9,
+    phq_sum,
+    sample_char,
+    weight = nrweight,
+    psu,
+    age,
+    year
+  ) %>%
+  drop_na(phq_1, phq_2, phq_3, phq_4, phq_5, phq_6, phq_7, phq_8, phq_9)
+
+# Combine with NHANES 2021-2023 from the main cleaned data
+df_recent <- bind_rows(
+  hms_recent,
+  df %>% filter(sample_char == "NHANES", most_recent_survey)
+) %>%
+  mutate(sample_fct = factor(sample_char, levels = c("NHANES", "HMS")))
+
+## Set global variables
+phq_items <- "phq_" %+% 1:9
+
+groups <- c("HMS", "NHANES")
+
+item_labels <- c(
+  phq_1 = "1. Anhedonia",
+  phq_2 = "2. Depressed mood",
+  phq_3 = "3. Sleep",
+  phq_4 = "4. Fatigue",
+  phq_5 = "5. Appetite",
+  phq_6 = "6. Feeling bad about self",
+  phq_7 = "7. Concentration",
+  phq_8 = "8. Psychomotor",
+  phq_9 = "9. Suicidal ideation"
+)
+
+# Item labels for tables (no period after the number, which pandoc would turn into a list)
+item_labels_table <- set_names(str_remove(item_labels, "\\."), names(item_labels))
+ 
+response_labels <- c(
+  "0" = "Not at all",
+  "1" = "Several days",
+  "2" = "More than half the days",
+  "3" = "Nearly every day"
+)
+
+
+## Set visual style
+sample_colors <- c("NHANES" = "#0072B2", "HMS" = "#D55E00")
+
+response_colors <- c("#a9c9ef", "#5d9ae3", "#2a78d6", "#0b3f80") # Light to dark blue: "not at all" to "nearly every day"
+
+
+## Set scheme labels (used in all cross-scheme tables and figures)
+scheme_labels <- c(
+  inv = "No Anchors (All Other Items Constrained)",
+  emp = "Empirical Anchors (4, 5)",
+  the = "Theory-Driven Anchors (1, 2)"
+)
+
+scheme_colors <- set_names(c("#1B2430", "#1baf7a", "#6250d6"), scheme_labels)
+
+
+## Set data labels (main analysis vs. sensitivity analysis)
+data_labels <- c(
+  pooled = "Main analysis (HMS 2025-26, NHANES 2011-23)",
+  recent = "HMS 2021-23, NHANES 2021-23"
+)
+
+data_colors <- set_names(c("#A6A6A6", "#0072B2"), data_labels)
+ 
+theme_style <- function(base_size = 9) {
+  theme_classic(base_size = base_size) +
+    theme(
+      legend.position = "top",
+      legend.justification = "left",
+      legend.title = element_blank(),
+      plot.title = element_text(face = "bold", size = base_size + 1),
+      plot.title.position = "plot",
+      strip.background = element_blank(),
+      strip.text = element_text(hjust = 0),
+      panel.spacing = unit(10, "pt")
+    )
+}
+
+
+## Set helper functions
+# Format a data frame as an HTML table (missing values print as blank)
+options(knitr.kable.NA = "")
+
+format_table <- function(x, caption, digits = 2, ...) {
+  x %>%
+    kable(caption = caption, digits = digits, format.args = list(big.mark = ","), ...) %>%
+    kable_styling(
+      bootstrap_options = c("striped", "condensed", "hover"),
+      full_width = F,
+      position = "left"
+    )
+}
+
+# Format p-values for tables
+format_p <- function(p) if_else(p < .001, "< .001", sprintf("%.3f", p))
+
+# DIF tests (uniform, non-uniform, omnibus) side by side; each test a data frame with item, X2, df, p
+dif_test_table <- function(tests, caption) {
+  tests %>%
+    bind_rows(.id = "test") %>%
+    group_by(item) %>%
+    mutate(anchor = any(df == 0)) %>% # Anchor items are not tested
+    ungroup() %>%
+    mutate(
+      across(c(X2, df), ~ if_else(anchor, NA_real_, .x)),
+      p = if_else(anchor, NA_character_, format_p(p)),
+      item = item_labels_table[item],
+      test = factor(test, levels = names(tests))
+    ) %>%
+    select(-anchor) %>%
+    pivot_wider(names_from = test, values_from = c(X2, df, p), names_glue = "{test}_{.value}") %>%
+    select(item, all_of(as.vector(t(outer(names(tests), c("X2", "df", "p"), paste, sep = "_"))))) %>%
+    format_table(caption, digits = 1, col.names = c("Item", rep(c("χ²", "df", "p"), 3))) %>%
+    add_header_above(c(" " = 1, set_names(rep(3, 3), names(tests))))
+}
+
+# Meade (2010) item-level effect sizes
+effect_size_table <- function(effect_sizes, caption) {
+  effect_sizes %>%
+    transmute(
+      Item = item_labels_table[item],
+      SIDS, UIDS, ESSD,
+      `Max difference` = max.D,
+      `Theta at max` = theta.of.max.D
+    ) %>%
+    format_table(caption)
+}
+
+save_figure <- function(plot, name, height, width = 7) {
+  ggsave(
+    filename = here("Sensitivity Analyses", "Figures", name %+% ".png"),
+    plot = plot,
+    width = width,
+    height = height,
+    units = "in",
+    dpi = 600,
+    bg = "white"
+  )
+}
+```
+
+# Sample
+
+```{r sample}
+list(pooled = df, recent = df_recent) %>%
+  map(~ count(.x, sample_fct)) %>%
+  bind_rows(.id = "data") %>%
+  pivot_wider(names_from = data, values_from = n) %>%
+  format_table("Analytic sample sizes", col.names = c("Sample", data_labels))
+
+hms_recent %>%
+  count(year) %>%
+  format_table("HMS 2021-2023 analytic sample by survey year", col.names = c("HMS year", "n"))
+```
+
+# Functions
+
+```{r functions}
+## Fit a two-group graded response model with the given items held equal across groups
+fit_model <- function(data, invariant_items) {
+  multipleGroup(
+    data = data[, phq_items],
+    model = 1,
+    group = data$sample_fct,
+    itemtype = "graded",
+    invariance = c(invariant_items, "free_means", "free_var"),
+    verbose = F
+  )
+}
+
+
+## Expected item scores on a theta grid by item and group; models[[j]] is the model used for item j
+expected_scores <- function(models) {
+  theta_grid <- seq(-5, 5, .01)
+
+  expand_grid(item = 1:9, group = groups) %>%
+    pmap(function(item, group) {
+      item_parameters <- extract.item(extract.group(models[[item]], group), item)
+
+      tibble(
+        theta = theta_grid,
+        item = item,
+        group = group,
+        ev = expected.item(item_parameters, theta_grid)
+      )
+    }) %>%
+    bind_rows()
+}
+
+
+## Test-level DIF: HMS minus NHANES expected total score, averaged over HMS respondents' EAP thetas
+test_level_impact <- function(model, curves) {
+  theta_hat_hms <- fscores(extract.group(model, "HMS"), method = "EAP")[, 1]
+
+  tcc_gap <- curves %>%
+    group_by(theta, group) %>%
+    summarize(total = sum(ev), .groups = "drop") %>%
+    pivot_wider(names_from = group, values_from = total) %>%
+    mutate(
+      theta = round(theta, 2),
+      gap = HMS - NHANES
+    )
+
+  tibble(theta = round(theta_hat_hms, 2)) %>%
+    left_join(tcc_gap, by = "theta") %>%
+    summarize(
+      STDS = mean(gap),
+      UTDS = mean(abs(gap))
+    )
+}
+
+
+## Fit all three schemes; return effect sizes, curves, latent means and impact
+run_schemes <- function(data) {
+
+  # Models: all items equal; empirical anchors; theory-driven anchors
+  models <- list(
+    inv = fit_model(data, phq_items),
+    emp = fit_model(data, c("phq_4", "phq_5")),
+    the = fit_model(data, c("phq_1", "phq_2"))
+  )
+
+  # Main scheme: release each item in turn
+  released_models <- map(1:9, ~ fit_model(data, phq_items[-.x]))
+
+  # Item-level effect sizes (Meade, 2010)
+  effect_sizes <- list(
+    inv = map2(released_models, 1:9, ~ empirical_ES(.x, focal_items = .y) %>% rownames_to_column("item")) %>%
+      bind_rows(),
+    emp = empirical_ES(models$emp, focal_items = 1:9) %>% rownames_to_column("item"),
+    the = empirical_ES(models$the, focal_items = 1:9) %>% rownames_to_column("item")
+  )
+
+  # Expected item scores
+  curves <- list(
+    inv = expected_scores(released_models),
+    emp = expected_scores(rep(list(models$emp), 9)),
+    the = expected_scores(rep(list(models$the), 9))
+  )
+
+  # HMS latent mean and SD
+  latent_means <- models %>%
+    map(~ coef(.x, simplify = T)$HMS) %>%
+    map(~ tibble(mean = .x$means[1], sd = sqrt(.x$cov[1, 1]))) %>%
+    bind_rows(.id = "scheme")
+
+  # Test-level impact
+  impact <- map2(models, curves, test_level_impact) %>%
+    bind_rows(.id = "scheme")
+
+  # Individual-level impact: DIF-adjusted vs naive theta
+  theta_naive <- fscores(models$inv, method = "EAP", full.scores.SE = T)
+  salient_threshold <- median(theta_naive[, "SE_F1"])
+
+  individual_impact <- models[c("emp", "the")] %>%
+    map(~ tibble(
+      sample = data$sample_fct,
+      theta_naive = theta_naive[, "F1"],
+      theta_adjusted = fscores(.x, method = "EAP")[, "F1"]
+    )) %>%
+    bind_rows(.id = "scheme") %>%
+    mutate(diff = theta_adjusted - theta_naive) %>%
+    group_by(scheme, sample) %>%
+    summarize(
+      r = cor(theta_naive, theta_adjusted),
+      mean_diff = mean(diff),
+      sd_diff = sd(diff),
+      max_abs_diff = max(abs(diff)),
+      pct_salient = mean(abs(diff) > salient_threshold),
+      .groups = "drop"
+    )
+
+  list(
+    models = models,
+    effect_sizes = bind_rows(effect_sizes, .id = "scheme"),
+    curves = bind_rows(curves, .id = "scheme"),
+    latent_means = latent_means,
+    impact = impact,
+    individual_impact = individual_impact,
+    salient_threshold = salient_threshold
+  )
+}
+```
+
+# Fit Models
+
+```{r fit-models, cache = T}
+results <- list(pooled = df, recent = df_recent) %>%
+  map(run_schemes)
+
+# Keep only the 2021-2023 models (for DIF tests below); main-analysis models are in Analysis.Rmd
+results$pooled$models <- NULL
+```
+
+# DIF Tests, HMS and NHANES 2021-2023
+
+```{r dif-tests, cache = T}
+models_recent <- results$recent$models
+
+## No anchors: free each item in turn from the all-equal model
+uniform_test_inv <- DIF(models_recent$inv, which.par = c("d1", "d2", "d3"), scheme = "drop", p.adjust = "none")
+omnibus_test_inv <- DIF(models_recent$inv, which.par = c("a1", "d1", "d2", "d3"), scheme = "drop", p.adjust = "none")
+
+## Anchored schemes: constrain each non-anchor item in turn in the free-baseline model
+nonuniform_test_emp <- DIF(models_recent$emp, which.par = "a1", scheme = "add", p.adjust = "none")
+omnibus_test_emp <- DIF(models_recent$emp, which.par = c("a1", "d1", "d2", "d3"), scheme = "add", p.adjust = "none")
+
+nonuniform_test_the <- DIF(models_recent$the, which.par = "a1", scheme = "add", p.adjust = "none")
+omnibus_test_the <- DIF(models_recent$the, which.par = c("a1", "d1", "d2", "d3"), scheme = "add", p.adjust = "none")
+```
+
+```{r dif-test-tables}
+## Tidy one DIF() result
+tidy_dif <- function(test) {
+  test %>%
+    rownames_to_column("item") %>%
+    select(item, X2, df, p)
+}
+
+## Difference between two nested tests (omnibus minus the other)
+difference_test <- function(omnibus, other, df) {
+  tibble(
+    item = rownames(omnibus),
+    X2 = omnibus$X2 - other$X2,
+    df = df,
+    p = pchisq(X2, df = df, lower.tail = F)
+  )
+}
+
+dif_test_table(
+  list(
+    Uniform = tidy_dif(uniform_test_inv),
+    `Non-uniform` = difference_test(omnibus_test_inv, uniform_test_inv, df = 1),
+    Omnibus = tidy_dif(omnibus_test_inv)
+  ),
+  "DIF tests, HMS and NHANES 2021-23: " %+% scheme_labels[["inv"]]
+)
+
+dif_test_table(
+  list(
+    Uniform = difference_test(omnibus_test_emp, nonuniform_test_emp, df = 3),
+    `Non-uniform` = tidy_dif(nonuniform_test_emp),
+    Omnibus = tidy_dif(omnibus_test_emp)
+  ),
+  "DIF tests, HMS and NHANES 2021-23: " %+% scheme_labels[["emp"]] %+% " (anchor items show no test)"
+)
+
+dif_test_table(
+  list(
+    Uniform = difference_test(omnibus_test_the, nonuniform_test_the, df = 3),
+    `Non-uniform` = tidy_dif(nonuniform_test_the),
+    Omnibus = tidy_dif(omnibus_test_the)
+  ),
+  "DIF tests, HMS and NHANES 2021-23: " %+% scheme_labels[["the"]] %+% " (anchor items show no test)"
+)
+```
+
+# Comparison: Main vs. 2021-2023 HMS and NHANES
+
+## Item-Level DIF
+
+```{r compare-items}
+## Effect sizes by data set and scheme
+effect_sizes <- results %>%
+  map("effect_sizes") %>%
+  bind_rows(.id = "data") %>%
+  mutate(
+    anchor = case_when(
+      scheme == "emp" ~ item %in% c("phq_4", "phq_5"),
+      scheme == "the" ~ item %in% c("phq_1", "phq_2"),
+      TRUE ~ FALSE
+    ),
+    data = factor(data_labels[data], levels = data_labels),
+    scheme = factor(scheme_labels[scheme], levels = scheme_labels)
+  )
+
+results %>%
+  map("effect_sizes") %>%
+  bind_rows(.id = "data") %>%
+  select(data, scheme, item, SIDS) %>%
+  pivot_wider(names_from = data, values_from = SIDS) %>%
+  mutate(
+    change = recent - pooled,
+    scheme = scheme_labels[scheme],
+    item = item_labels_table[item]
+  ) %>%
+  format_table(
+    "SIDS by scheme: main analysis vs. HMS and NHANES 2021-23",
+    col.names = c("Scheme", "Item", data_labels, "Change")
+  ) %>%
+  collapse_rows(columns = 1, valign = "top")
+
+
+## Plot: SIDS, main vs. 2021-23, by scheme
+sids_comparison_plot <- effect_sizes %>%
+  mutate(item = factor(item_labels[item], levels = rev(item_labels))) %>%
+  ggplot(aes(SIDS, item)) +
+  geom_vline(xintercept = 0, color = "grey50", linewidth = .3) +
+  geom_line(aes(group = item), color = "grey80", linewidth = .6) +
+  geom_point(aes(color = data, shape = anchor), size = 2) +
+  facet_wrap(~ scheme, nrow = 1) +
+  scale_color_manual(values = data_colors) +
+  scale_shape_manual(
+    values = c(`FALSE` = 16, `TRUE` = 1),
+    labels = c(`FALSE` = "Studied item", `TRUE` = "Anchor item")
+  ) +
+  scale_x_continuous(name = "SIDS: HMS minus NHANES expected item score at the same theta (points, 0-3)") +
+  scale_y_discrete(name = NULL) +
+  labs(title = "Item-Level DIF (SIDS): Main Analysis vs. HMS and NHANES 2021-23") +
+  theme_style() +
+  theme(legend.box = "vertical", legend.box.just = "left", legend.spacing.y = unit(2, "pt"), legend.margin = margin(0, 0, 0, 0), panel.spacing.x = unit(14, "pt"))
+
+sids_comparison_plot
+
+save_figure(sids_comparison_plot, "2021-23 HMS vs 2021-23 NHANES - SIDS, Main vs Sensitivity", height = 4.5, width = 8)
+```
+
+## Latent Means and Test-Level Impact
+
+```{r compare-test-level}
+## HMS latent mean and SD
+results %>%
+  map("latent_means") %>%
+  bind_rows(.id = "data") %>%
+  pivot_wider(names_from = data, values_from = c(mean, sd), names_glue = "{data}_{.value}") %>%
+  transmute(
+    scheme = scheme_labels[scheme],
+    pooled_mean, pooled_sd, recent_mean, recent_sd
+  ) %>%
+  format_table(
+    "HMS latent mean and SD (NHANES fixed at mean 0, SD 1)",
+    col.names = c("Scheme", "Mean", "SD", "Mean", "SD")
+  ) %>%
+  add_header_above(c(" " = 1, set_names(c(2, 2), data_labels)))
+
+
+## Test-level DIF (STDS, UTDS)
+results %>%
+  map("impact") %>%
+  bind_rows(.id = "data") %>%
+  pivot_wider(names_from = data, values_from = c(STDS, UTDS), names_glue = "{data}_{.value}") %>%
+  transmute(
+    scheme = scheme_labels[scheme],
+    pooled_STDS, pooled_UTDS, recent_STDS, recent_UTDS
+  ) %>%
+  format_table(
+    "Test-level DIF: HMS minus NHANES expected total score, averaged over HMS respondents",
+    col.names = c("Scheme", "STDS", "UTDS", "STDS", "UTDS")
+  ) %>%
+  add_header_above(c(" " = 1, set_names(c(2, 2), data_labels)))
+
+
+## Individual-level impact
+results %>%
+  map("individual_impact") %>%
+  bind_rows(.id = "data") %>%
+  mutate(
+    data = data_labels[data],
+    scheme = scheme_labels[scheme],
+    pct_salient = percent(pct_salient, .1)
+  ) %>%
+  select(data, scheme, everything()) %>%
+  format_table(
+    "Individual-level DIF impact: DIF-adjusted minus naive theta (salient if |difference| > median SE: " %+%
+      sprintf("%.2f", results$pooled$salient_threshold) %+% " main, " %+%
+      sprintf("%.2f", results$recent$salient_threshold) %+% " 2021-23)",
+    digits = 3,
+    col.names = c("Data", "Scheme", "Sample", "r", "Mean difference", "SD of difference", "Max |difference|", "% salient")
+  ) %>%
+  collapse_rows(columns = 1:2, valign = "top")
+
+
+## Plot: test characteristic curves, main vs. 2021-23
+tcc_comparison <- results %>%
+  map("curves") %>%
+  bind_rows(.id = "data") %>%
+  filter(between(theta, -3, 4)) %>%
+  group_by(data, scheme, theta, group) %>%
+  summarize(total = sum(ev), .groups = "drop") %>%
+  mutate(
+    data = factor(data_labels[data], levels = data_labels),
+    scheme = factor(scheme_labels[scheme], levels = scheme_labels),
+    group = factor(group, levels = c("NHANES", "HMS"))
+  )
+
+tcc_comparison_plot <- tcc_comparison %>%
+  ggplot(aes(theta, total, color = group, linetype = data)) +
+  geom_hline(yintercept = 10, color = "grey70", linewidth = .3, linetype = "dashed") +
+  geom_line(linewidth = .6) +
+  facet_wrap(~ scheme, nrow = 1) +
+  scale_color_manual(values = sample_colors) +
+  scale_linetype_manual(values = set_names(c("dotted", "solid"), data_labels)) +
+  scale_x_continuous(
+    name = expression("Depression (" * theta * ", NHANES SD units)"),
+    limits = c(-3, 4),
+    breaks = -3:4
+  ) +
+  scale_y_continuous(
+    name = "Expected PHQ-9 total score",
+    limits = c(0, 27),
+    breaks = seq(0, 27, 3)
+  ) +
+  labs(title = "Expected PHQ-9 Total Score by θ, Group, and Anchoring Scheme: Main Analysis vs. HMS and NHANES 2021-23") +
+  theme_style() +
+  theme(legend.box = "vertical", legend.box.just = "left", legend.spacing.y = unit(2, "pt"), legend.margin = margin(0, 0, 0, 0), panel.spacing.x = unit(14, "pt"))
+
+tcc_comparison_plot
+
+save_figure(tcc_comparison_plot, "2021-23 HMS vs 2021-23 NHANES - Test Characteristic Curves, Main vs Sensitivity", height = 3.6, width = 8)
+```
+
+# Depression Prevalence by Screening Methodology
+
+```{r depression-prevalence}
+options(survey.lonely.psu = "adjust")
+
+## Screening definitions (each a 0/1 indicator)
+add_screens <- function(data) {
+  data %>%
+    mutate(
+      phq_2_sum = phq_1 + phq_2,
+      n_criteria = rowSums(across(phq_1:phq_9, ~ . >= 2)),
+      screen_phq9 = as.numeric(phq_sum >= 10),
+      screen_phq2 = as.numeric(phq_2_sum >= 3),
+      screen_phq2_phq9 = as.numeric(phq_2_sum >= 3 & phq_sum >= 10),
+      screen_algorithm = as.numeric(n_criteria >= 5 & (phq_1 >= 2 | phq_2 >= 2))
+    )
+}
+
+screen_labels <- c(
+  screen_phq9 = "PHQ-9 ≥ 10",
+  screen_phq2 = "PHQ-2 ≥ 3",
+  screen_phq2_phq9 = "PHQ-2 ≥ 3 and PHQ-9 ≥ 10",
+  screen_algorithm = "DSM-5 algorithm"
+)
+
+
+## Survey designs
+# NHANES: build on all cycles, then subset to 2021-2023 (as in Analysis.Rmd)
+nhanes_design <- svydesign(
+  data = df %>% filter(sample_fct == "NHANES") %>% add_screens(),
+  ids = ~ psu, strata = ~ strata, weights = ~ weight, nest = TRUE
+) %>%
+  subset(most_recent_survey)
+
+# HMS 2021-2023: survey year as strata, schools nested within year as clusters, nonresponse weights
+hms_design <- svydesign(
+  data = df_recent %>% filter(sample_fct == "HMS") %>% add_screens(),
+  ids = ~ psu, strata = ~ year, weights = ~ weight, nest = TRUE
+)
+
+
+## Weighted prevalence (logit CIs) by screening definition and sample
+designs <- list(NHANES = nhanes_design, HMS = hms_design)
+
+prevalence <- expand_grid(
+  sample = names(designs),
+  screen = names(screen_labels)
+) %>%
+  mutate(
+    est = map2(sample, screen, ~ svyciprop(as.formula("~" %+% .y), designs[[.x]], method = "logit")),
+    prevalence = map_dbl(est, as.numeric),
+    lower = map_dbl(est, ~ confint(.x)[1]),
+    upper = map_dbl(est, ~ confint(.x)[2]),
+    sample = factor(sample, levels = names(designs)),
+    screen = factor(screen_labels[screen], levels = screen_labels)
+  ) %>%
+  select(-est)
+
+
+## Table: prevalence (95% CI) by sample, plus HMS / NHANES ratio
+prevalence_table <- prevalence %>%
+  mutate(estimate = percent(prevalence, .1) %+% " (" %+% percent(lower, .1) %+% ", " %+% percent(upper, .1) %+% ")") %>%
+  select(screen, sample, estimate, prevalence) %>%
+  pivot_wider(names_from = sample, values_from = c(estimate, prevalence)) %>%
+  mutate(ratio = round(prevalence_HMS / prevalence_NHANES, 1)) %>%
+  select(screen, NHANES = estimate_NHANES, HMS = estimate_HMS, ratio) %>%
+  arrange(screen)
+
+prevalence_table %>%
+  format_table(
+    "Weighted prevalence of a positive screen, % (95% CI); NHANES 2021-23, HMS 2021-23",
+    col.names = c("Screening method", "NHANES", "HMS", "HMS / NHANES")
+  )
+
+
+## Plot: prevalence (95% CI) by screening method and sample, with HMS / NHANES ratio
+ratio_x <- ceiling(max(prevalence$upper) * 20) / 20 + .02 # Ratio column sits just right of the widest CI
+
+prevalence_plot <- prevalence %>%
+  ggplot(aes(prevalence, fct_rev(screen), color = sample)) +
+  geom_linerange(aes(xmin = lower, xmax = upper), linewidth = .6) +
+  geom_point(size = 2) +
+  geom_text(
+    data = prevalence_table,
+    aes(x = ratio_x, y = fct_rev(screen), label = "× " %+% sprintf("%.1f", ratio)),
+    inherit.aes = F,
+    hjust = 0, size = 8 / .pt
+  ) +
+  annotate(
+    "text",
+    x = ratio_x, y = length(screen_labels) + .5, label = "HMS ÷ NHANES",
+    hjust = 0, size = 7.5 / .pt, color = "grey35"
+  ) +
+  scale_color_manual(
+    values = sample_colors,
+    labels = c(NHANES = "NHANES 2021–23", HMS = "HMS 2021–23")
+  ) +
+  scale_x_continuous(
+    name = "Weighted prevalence of a positive screen (95% CI)",
+    labels = percent,
+    limits = c(0, ratio_x + .05),
+    breaks = seq(0, floor(ratio_x * 10) / 10, .1)
+  ) +
+  scale_y_discrete(name = NULL) +
+  coord_cartesian(clip = "off") +
+  labs(title = "Positive Screens by Screening Method and Sample") +
+  theme_style() +
+  theme(panel.grid.major.x = element_line(color = "grey92", linewidth = .3))
+
+prevalence_plot
+
+save_figure(prevalence_plot, "2021-23 HMS vs 2021-23 NHANES - Prevalence by Screening Method", height = 3.2)
+```
